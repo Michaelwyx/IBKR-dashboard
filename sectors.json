@@ -1,0 +1,46 @@
+{
+  "_comment": "标的 -> sector 的映射。Positions tab 的两张饼图用它。没映射到的归入 '其他'。期权按 underlyingSymbol 自动匹配（如 ASTS 的 call 自动归到 ASTS 的 sector）。新加的标的直接在这里加一行即可。",
+  "sectors": {
+    "AAOI":   "CPO",
+    "LITE":   "CPO",
+    "AXTI":   "CPO",
+    "AAOX":   "CPO",
+    "LITX":   "CPO",
+    "PATH":   "CPO",
+    "AEHR":   "CPO",
+    "LWLG":   "CPO",
+
+    "MU":     "存储",
+    "MUU":    "存储",
+    "SNDK":   "存储",
+    "SNXX":   "存储",
+    "285A":   "存储",
+    "285A.T": "存储",
+    "7099":   "存储",
+    "7099.T": "存储",
+
+    "INTC":   "半导体",
+    "TSM":    "半导体",
+    "TSMX":   "半导体",
+    "INTW":   "半导体",
+    "AMD":    "半导体",
+    "AMDL":   "半导体",
+    "NVDA":   "半导体",
+    "NVDL":   "半导体",
+
+    "ASTS":   "太空",
+    "SATS":   "太空",
+
+    "UUUU":   "其他",
+    "PLTR":   "其他",
+    "CRWD":   "其他",
+    "VELO":   "其他",
+    "EWY":    "其他",
+    "GTLB":   "其他",
+    "KORU":   "其他",
+    "PTIR":   "其他",
+
+    "AGQ":    "贵金属",
+    "GLD":    "贵金属"
+  }
+}

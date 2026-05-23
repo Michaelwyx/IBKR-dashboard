@@ -1,0 +1,28 @@
+# ─── Sensitive ────────────────────────────────────────────
+# IBKR Flex token + Query ID
+config.json
+
+# Raw account data pulled from IBKR
+data/
+ibkr-data/
+
+# Built dashboard with real numbers
+site/data/
+
+# Logs
+logs/
+*.log
+cron.log
+daily.log
+
+# ─── Runtime / OS ─────────────────────────────────────────
+.serve.pid
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.DS_Store
+.idea/
+.vscode/
+*.swp

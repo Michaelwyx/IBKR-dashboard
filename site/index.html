@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IBKR Dashboard</title>
+  <link rel="stylesheet" href="./assets/style.css?v=20260523n" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="title-row">
+      <h1 data-i18n="app.title">IBKR Dashboard</h1>
+      <div class="topbar-right">
+        <div class="meta-text">
+          <span data-i18n="app.lastPulled">Last pulled</span>:
+          <span id="pulledAt">—</span>
+          <span class="dot">·</span>
+          <span data-i18n="app.built">Built</span>:
+          <span id="builtAt">—</span>
+        </div>
+        <div class="controls">
+          <button id="langToggle" class="ctrl" title="Language / 语言">
+            <span data-i18n="ctrl.lang">中/EN</span>
+          </button>
+          <button id="themeToggle" class="ctrl" title="Theme">
+            <span id="themeIcon">☀</span>
+          </button>
+          <button id="refreshBtn" class="ctrl" title="Refresh">
+            <span>↻</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="equity"    role="tab" data-i18n="tab.equity">Equity</button>
+    <button class="tab"        data-tab="daily"     role="tab" data-i18n="tab.daily">Daily P&amp;L</button>
+    <button class="tab"        data-tab="positions" role="tab" data-i18n="tab.positions">Positions</button>
+    <button class="tab"        data-tab="trades"    role="tab" data-i18n="tab.trades">Trades</button>
+    <button class="tab"        data-tab="bySymbol"  role="tab" data-i18n="tab.bySymbol">By Symbol</button>
+    <button class="tab"        data-tab="notes"     role="tab" data-i18n="tab.notes">Notes</button>
+  </nav>
+
+  <main>
+    <!-- Equity tab -->
+    <section class="tab-panel" id="panel-equity">
+      <div class="kpi-row" id="equityKpis"></div>
+
+      <div class="card">
+        <h2 data-i18n="equity.curve">Equity Curve</h2>
+        <div class="chart-wrap"><canvas id="equityChart"></canvas></div>
+      </div>
+      <div class="card">
+        <h2 data-i18n="equity.drawdown">Drawdown</h2>
+        <div class="chart-wrap"><canvas id="drawdownChart"></canvas></div>
+      </div>
+      <div class="card">
+        <h2 data-i18n="equity.stats">Performance Statistics</h2>
+        <table class="stat-list" id="equityStats"></table>
+      </div>
+    </section>
+
+    <!-- Daily P&L tab -->
+    <section class="tab-panel hidden" id="panel-daily">
+      <div class="card">
+        <div class="toolbar">
+          <div class="seg-group" data-control="granularity" role="tablist">
+            <button class="seg active" data-value="day"   data-i18n="daily.gran.day">Day</button>
+            <button class="seg"        data-value="week"  data-i18n="daily.gran.week">Week</button>
+            <button class="seg"        data-value="month" data-i18n="daily.gran.month">Month</button>
+          </div>
+          <div class="toolbar-spacer"></div>
+          <div class="pnl-summary" id="pnlSummary"></div>
+        </div>
+        <h3 class="sub-heading" data-i18n="daily.barTitle">Bar Chart</h3>
+        <div class="chart-wrap"><canvas id="dailyPnlChart"></canvas></div>
+        <hr class="card-sep" />
+        <h3 class="sub-heading" data-i18n="daily.calendarTitle">Calendar</h3>
+        <div class="calendar-wrap" id="dailyCalendarWrap"></div>
+      </div>
+    </section>
+
+    <!-- Positions tab -->
+    <section class="tab-panel hidden" id="panel-positions">
+      <div class="kpi-row kpi-row-4" id="positionsKpis"></div>
+
+      <div class="card">
+        <div class="card-header">
+          <h2 data-i18n="positions.title">Current Positions</h2>
+          <span class="muted" id="positionsAsOf"></span>
+        </div>
+        <table id="positionsTable" class="data-table">
+          <thead>
+            <tr>
+              <th data-i18n="positions.symbol">Symbol</th>
+              <th data-i18n="positions.cat">Category</th>
+              <th class="num" data-i18n="positions.qty">Quantity</th>
+              <th class="num" data-i18n="positions.cost">Cost Price</th>
+              <th class="num" data-i18n="positions.mark">Market Price</th>
+              <th class="num" data-i18n="positions.change">Change</th>
+              <th class="num" data-i18n="positions.dayPnl">Today&#39;s P&amp;L</th>
+              <th class="num" data-i18n="positions.unrealized">Unrealized P&amp;L</th>
+              <th class="num" data-i18n="positions.pctNav">% of NAV</th>
+              <th data-i18n="positions.currency">Ccy</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2 data-i18n="positions.allocation">Allocation</h2>
+        <div class="two-col allocation-grid">
+          <div>
+            <h3 class="sub-heading" data-i18n="positions.allocByPos">By Position</h3>
+            <div class="chart-wrap"><canvas id="posAllocChart"></canvas></div>
+          </div>
+          <div>
+            <h3 class="sub-heading" data-i18n="positions.allocBySector">By Sector</h3>
+            <div class="chart-wrap"><canvas id="sectorPieChart"></canvas></div>
+          </div>
+        </div>
+        <table id="sectorTable" class="data-table allocation-table">
+          <thead>
+            <tr>
+              <th data-i18n="positions.sector">Sector</th>
+              <th data-i18n="positions.tickers">Tickers</th>
+              <th class="num" data-i18n="positions.valueBase">Value</th>
+              <th class="num" data-i18n="positions.pctNav">% of NAV</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <div class="muted allocation-note" id="cashNote"></div>
+      </div>
+    </section>
+
+    <!-- Trades tab -->
+    <section class="tab-panel hidden" id="panel-trades">
+      <div class="card">
+        <h2 data-i18n="trades.title">Trades</h2>
+        <div class="toolbar">
+          <label class="toolbar-label">
+            <span data-i18n="trades.rangeLabel">Range</span>
+            <select id="tradeRangeSelect" class="toggle-select">
+              <option value="1d"  data-i18n="trades.range.1d">Last Day</option>
+              <option value="1w"  data-i18n="trades.range.1w" selected>Last Week</option>
+              <option value="1m"  data-i18n="trades.range.1m">Last Month</option>
+              <option value="3m"  data-i18n="trades.range.3m">Last 3 Months</option>
+              <option value="ytd" data-i18n="trades.range.ytd">YTD</option>
+            </select>
+          </label>
+          <div class="seg-group" data-control="tradeCategory" role="tablist">
+            <button class="seg active" data-value="all" data-i18n="trades.cat.all">All</button>
+            <button class="seg"        data-value="STK" data-i18n="trades.cat.stk">Stocks</button>
+            <button class="seg"        data-value="OPT" data-i18n="trades.cat.opt">Options</button>
+          </div>
+          <div class="toolbar-spacer"></div>
+          <div class="muted pnl-summary" id="tradesCount"></div>
+        </div>
+        <table id="tradesTable" class="data-table">
+          <thead>
+            <tr>
+              <th data-i18n="trades.time">Time</th>
+              <th data-i18n="trades.symbol">Symbol</th>
+              <th data-i18n="trades.cat">Type</th>
+              <th data-i18n="trades.side">Side</th>
+              <th class="num" data-i18n="trades.qty">Quantity</th>
+              <th class="num" data-i18n="trades.price">Price</th>
+              <th class="num" data-i18n="trades.commission">Commission</th>
+              <th class="num" data-i18n="trades.realized">Realized P&amp;L (Base)</th>
+              <th data-i18n="trades.currency">Ccy</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- By Symbol tab -->
+    <section class="tab-panel hidden" id="panel-bySymbol">
+      <div class="card">
+        <div class="toolbar">
+          <div class="seg-group" data-control="bySymbolType" role="tablist">
+            <button class="seg active" data-value="STK" data-i18n="bySymbol.stocks">Stocks</button>
+            <button class="seg"        data-value="OPT" data-i18n="bySymbol.options">Options</button>
+          </div>
+          <label class="toolbar-label">
+            <span data-i18n="bySymbol.topN">Top</span>
+            <select id="bySymbolTopNSelect" class="toggle-select">
+              <option value="5">5</option>
+              <option value="10">10</option>
+              <option value="all" selected data-i18n="bySymbol.all">All</option>
+            </select>
+          </label>
+          <div class="toolbar-spacer"></div>
+          <div class="muted" data-i18n="bySymbol.divergingHint">Gain to the right · Loss to the left</div>
+        </div>
+        <div class="chart-wrap chart-wrap-tall"><canvas id="bySymbolChart"></canvas></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h2 data-i18n="bySymbol.tableTitle">All Symbols</h2>
+          <div class="seg-group" data-control="bySymbolTableCat" role="tablist">
+            <button class="seg active" data-value="all" data-i18n="trades.cat.all">All</button>
+            <button class="seg"        data-value="STK" data-i18n="trades.cat.stk">Stocks</button>
+            <button class="seg"        data-value="OPT" data-i18n="trades.cat.opt">Options</button>
+          </div>
+        </div>
+        <table id="bySymbolTable" class="data-table">
+          <thead>
+            <tr>
+              <th data-i18n="bySymbol.symbol">Symbol</th>
+              <th data-i18n="bySymbol.cat">Category</th>
+              <th class="num" data-i18n="bySymbol.trades">Trades</th>
+              <th class="num" data-i18n="bySymbol.realizedNative">Realized (Native)</th>
+              <th class="num" data-i18n="bySymbol.realizedBase">Realized (Base)</th>
+              <th class="num" data-i18n="bySymbol.commission">Commission</th>
+              <th data-i18n="bySymbol.currency">Ccy</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Notes tab -->
+    <section class="tab-panel hidden" id="panel-notes">
+      <div class="card">
+        <h2 data-i18n="notes.title">Methodology Notes</h2>
+        <ul id="notesList" class="notes-list"></ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="muted">
+    <span data-i18n="footer.source">Data from IBKR Flex Web Service / local scripts.</span>
+    <span data-i18n="footer.local">All calculations run on your machine.</span>
+  </footer>
+
+  <script src="./assets/app.js?v=20260523n"></script>
+</body>
+</html>

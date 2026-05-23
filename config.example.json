@@ -1,0 +1,15 @@
+{
+  "_comment": "Copy this file to config.json and fill in real values. Two ways to provide the token: (a) paste it directly into the 'token' field, or (b) put 'env:IBKR_FLEX_TOKEN' and set the env var IBKR_FLEX_TOKEN in your shell.",
+
+  "token": "env:IBKR_FLEX_TOKEN",
+
+  "queries": {
+    "activity": "REPLACE_WITH_YOUR_QUERY_ID"
+  },
+
+  "output_dir": "./data",
+
+  "user_agent": "ibkr-flex-puller/1.0 (+python-stdlib)",
+  "poll_interval_seconds": 5,
+  "poll_max_attempts": 12
+}
