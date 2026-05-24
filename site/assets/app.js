@@ -46,6 +46,10 @@ const I18N = {
     "daily.summary.posDays": "盈利",
     "daily.legend.loss": "亏",
     "daily.legend.gain": "盈",
+    "daily.clickHint": "提示：在 \"日\" 粒度下，点击柱图或日历方块可以查看当日持仓。",
+    "daily.positionsOn": "当日持仓 ·",
+    "daily.noPositionsOn": "该日期无持仓快照。可能在年初之前，或该日 IBKR Flex 未生成数据。",
+    "daily.positionsList": "持仓明细",
     "positions.title": "当前持仓",
     "positions.asOf": "数据截至 ",
     "positions.symbol": "标的",
@@ -98,6 +102,13 @@ const I18N = {
     "bySymbol.all": "全部",
     "bySymbol.divergingHint": "盈利向右 · 亏损向左",
     "bySymbol.tableTitle": "全部标的",
+    "bySymbol.clickHint": "提示：点击上方任一柱条或下方任一行，可以看到该标的的 K 线图（带你的买卖点位）+ 全部交易历史。",
+    "bySymbol.detailTitle": "标的详情 ·",
+    "bySymbol.tradeHistory": "交易历史",
+    "bySymbol.noPrices": "本地没有该标的的行情缓存。运行 `python3 fetch_prices.py --symbols {sym}` 拉一下。",
+    "bySymbol.priceLoadFail": "加载行情失败：",
+    "bySymbol.buy": "买入",
+    "bySymbol.sell": "卖出",
     "bySymbol.symbol": "标的",
     "bySymbol.cat": "类别",
     "bySymbol.trades": "笔数",
@@ -157,6 +168,10 @@ const I18N = {
     "daily.summary.posDays": "Winning",
     "daily.legend.loss": "Loss",
     "daily.legend.gain": "Gain",
+    "daily.clickHint": "Tip: in Day granularity, click any bar or calendar cell to view that day's positions.",
+    "daily.positionsOn": "Positions on",
+    "daily.noPositionsOn": "No position snapshot for this date (likely before YTD, or IBKR Flex didn't emit one).",
+    "daily.positionsList": "Position List",
     "positions.title": "Current Positions",
     "positions.asOf": "As of ",
     "positions.symbol": "Symbol",
@@ -209,6 +224,13 @@ const I18N = {
     "bySymbol.all": "All",
     "bySymbol.divergingHint": "Gain →   · ←  Loss",
     "bySymbol.tableTitle": "All Symbols",
+    "bySymbol.clickHint": "Tip: click any bar above or any row below to see the candlestick chart with your buy/sell points and full trade history for that symbol.",
+    "bySymbol.detailTitle": "Symbol Detail ·",
+    "bySymbol.tradeHistory": "Trade History",
+    "bySymbol.noPrices": "No local price cache for this symbol. Run `python3 fetch_prices.py --symbols {sym}` to fetch it.",
+    "bySymbol.priceLoadFail": "Failed to load prices: ",
+    "bySymbol.buy": "BUY",
+    "bySymbol.sell": "SELL",
     "bySymbol.symbol": "Symbol",
     "bySymbol.cat": "Category",
     "bySymbol.trades": "Trades",
@@ -237,6 +259,8 @@ const state = {
   theme: localStorage.getItem("ibkr.theme") || "light",
   tab: localStorage.getItem("ibkr.tab") || "equity",
   granularity: "day",      // day | week | month
+  selectedDay: null,       // 用户点击 daily P&L 后选中的日期 (ISO "2026-05-22")
+  selectedSymbol: null,    // 用户点击 By Symbol 后选中的 ticker（已转成 underlying）
   tradeRange: "1w",            // 1d | 1w | 1m | 3m | ytd
   tradeCategory: "all",        // all | STK | OPT
   bySymbolType: "STK",         // STK | OPT — 哪一类显示在 diverging chart
@@ -576,6 +600,7 @@ function renderDailyBar(items) {
   destroyChart("dailyPnl");
   if (!items.length) return;
   const th = chartTheme();
+  const clickable = state.granularity === "day";
   charts.dailyPnl = new Chart(document.getElementById("dailyPnlChart"), {
     type: "bar",
     data: {
@@ -593,6 +618,16 @@ function renderDailyBar(items) {
       scales: {
         x: { grid: { display: false }, ticks: { maxTicksLimit: 14 } },
         y: { grid: { color: th.grid }, ticks: { callback: v => "$" + fmtMoneyCompact(v) } },
+      },
+      onClick: (_evt, els) => {
+        if (!clickable || !els.length) return;
+        const idx = els[0].index;
+        const iso = items[idx].key;             // e.g. "2026-05-22"
+        selectDay(iso);
+      },
+      onHover: (evt, els) => {
+        evt.native && evt.native.target && (evt.native.target.style.cursor =
+          clickable && els.length ? "pointer" : "default");
       },
     },
   });
@@ -727,14 +762,17 @@ function renderDayCalendar(wrap, items, maxAbs) {
       cell.className = "cal-cell";
       const item = itemByDay.get(d);
       if (item) {
-        cell.classList.add("has-data", item.pnl >= 0 ? "pos" : "neg");
+        cell.classList.add("has-data", "clickable", item.pnl >= 0 ? "pos" : "neg");
         const bg = colorForPnl(item.pnl, maxAbs);
         if (bg) cell.style.background = bg;
+        const iso = formatISODate(item.dateObj);
+        cell.dataset.date = iso;
         cell.innerHTML = `
           <span class="cal-cell-date">${d}</span>
           <span class="cal-cell-value">${fmtPnlK(item.pnl)}</span>
         `;
-        cell.title = `${formatISODate(item.dateObj)}: ${fmtMoney(item.pnl)}`;
+        cell.title = `${iso}: ${fmtMoney(item.pnl)} — click for positions`;
+        cell.addEventListener("click", () => selectDay(iso));
       } else {
         cell.innerHTML = `<span class="cal-cell-date">${d}</span>`;
       }
@@ -837,11 +875,64 @@ function renderDaily() {
   renderDailyPnlSummary(items);
   renderDailyBar(items);
   renderCalendar(items, state.granularity);
+  // 切换粒度时清掉已选日期（week / month 下用不上）
+  if (state.granularity !== "day" && state.selectedDay) {
+    clearSelectedDay();
+  }
+}
+
+// 选中某天 → 找出 positionsByDate 里该日的快照，展开 dayPositionsCard
+function isoToReportDate(iso) {
+  // "2026-05-22" -> "20260522"
+  return iso ? iso.replace(/-/g, "") : "";
+}
+
+function selectDay(isoDate) {
+  state.selectedDay = isoDate;
+  renderSelectedDay();
+  const card = document.getElementById("dayPositionsCard");
+  if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function clearSelectedDay() {
+  state.selectedDay = null;
+  const card = document.getElementById("dayPositionsCard");
+  if (card) card.classList.add("hidden");
+}
+
+function renderSelectedDay() {
+  const card = document.getElementById("dayPositionsCard");
+  if (!card) return;
+  if (!state.selectedDay) { card.classList.add("hidden"); return; }
+  card.classList.remove("hidden");
+
+  document.getElementById("dayPositionsDate").textContent = state.selectedDay;
+
+  const m = (state.data && state.data.metrics) || {};
+  const rd = isoToReportDate(state.selectedDay);
+
+  // KPIs（NLV / Market Value / Cash / Position %）
+  const summary = (m.accountSummaryByDate || {})[rd] || null;
+  renderPositionsKpis(summary, "dayKpis");
+
+  // 当日 sector 分布（前端从该日 positions 算出 breakdown）
+  const dayPositions = (m.positionsByDate || {})[rd] || [];
+  const breakdown = computeSectorBreakdown(dayPositions);
+  renderBySectorPie(breakdown, summary, "daySectorPie", "daySectorPie");
+  renderSectorTable(breakdown, summary, "daySectorTable", "dayCashNote");
+
+  // 持仓表
+  const tbody = document.querySelector("#dayPositionsTable tbody");
+  if (!dayPositions.length) {
+    tbody.innerHTML = `<tr><td colspan="10" class="empty">${t("daily.noPositionsOn")}</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = dayPositions.map(positionRowHtml).join("");
 }
 
 /* ─────────────────────────── Positions tab ─────────────────────────── */
-function renderPositionsKpis(summary) {
-  const root = document.getElementById("positionsKpis");
+function renderPositionsKpis(summary, rootId) {
+  const root = document.getElementById(rootId || "positionsKpis");
   if (!root) return;
   if (!summary) { root.innerHTML = ""; return; }
   const cards = [
@@ -934,6 +1025,23 @@ function positionRowHtml(p) {
   `;
 }
 
+// 客户端按持仓数组算 sector breakdown（用于历史日；analytics.py 只算最新日）
+function computeSectorBreakdown(positions) {
+  const agg = {};
+  for (const p of (positions || [])) {
+    const s = p.sector || "其他";
+    const v = p.positionValueInBase;
+    if (v == null) continue;
+    if (!agg[s]) agg[s] = { sector: s, valueInBase: 0, count: 0, symbols: [] };
+    agg[s].valueInBase += v;
+    agg[s].count += 1;
+    if (p.symbol) agg[s].symbols.push(p.symbol);
+  }
+  return Object.values(agg)
+    .sort((a, b) => b.valueInBase - a.valueInBase)
+    .map(r => ({ ...r, valueInBase: Math.round(r.valueInBase * 100) / 100 }));
+}
+
 // 板块基色（按 sectorBreakdown 顺序循环使用）
 const SECTOR_PALETTE = [
   "#7596b7",  // 蓝
@@ -992,10 +1100,11 @@ function makeDoughnut(ctx, key, labels, data, colors, tipFmt) {
   });
 }
 
-function renderBySectorPie(breakdown, summary) {
-  const ctx = document.getElementById("sectorPieChart");
+function renderBySectorPie(breakdown, summary, canvasId, chartKey) {
+  const ctx = document.getElementById(canvasId || "sectorPieChart");
+  const key = chartKey || "sectorPie";
   if (!ctx) return;
-  destroyChart("sectorPie");
+  destroyChart(key);
   const cash = (summary && summary.totalCash) || 0;
   const labels = [];
   const data = [];
@@ -1006,11 +1115,11 @@ function renderBySectorPie(breakdown, summary) {
     colors.push(SECTOR_PALETTE[i % SECTOR_PALETTE.length]);
   });
   if (cash > 0) { labels.push(t("positions.cash")); data.push(cash); colors.push(CASH_COLOR); }
-  if (!data.length) return emptyDoughnut(ctx, "sectorPie");
+  if (!data.length) return emptyDoughnut(ctx, key);
 
   const cssBg = getComputedStyle(document.documentElement).getPropertyValue("--bg-card").trim() || "#fff";
   const textColor = getComputedStyle(document.documentElement).getPropertyValue("--text").trim() || "#222";
-  charts.sectorPie = new Chart(ctx, {
+  charts[key] = new Chart(ctx, {
     type: "doughnut",
     data: { labels, datasets: [{ data, backgroundColor: colors, borderColor: cssBg, borderWidth: 2 }] },
     options: {
@@ -1120,8 +1229,9 @@ function renderByPositionPie(positions, breakdown, summary) {
   });
 }
 
-function renderSectorTable(breakdown, summary) {
-  const tbody = document.querySelector("#sectorTable tbody");
+function renderSectorTable(breakdown, summary, tableId, noteId) {
+  const tbody = document.querySelector("#" + (tableId || "sectorTable") + " tbody");
+  if (!tbody) return;
   const nlv = (summary && summary.totalNlv) || 0;
   const rows = [];
   (breakdown || []).forEach(s => {
@@ -1159,14 +1269,16 @@ function renderSectorTable(breakdown, summary) {
   }
   tbody.innerHTML = rows.join("") || `<tr><td colspan="4" class="empty">${t("empty.noData")}</td></tr>`;
 
-  const note = document.getElementById("cashNote");
+  const note = document.getElementById(noteId || "cashNote");
   const cash = (summary && summary.totalCash) || 0;
-  if (cash < 0) {
-    note.className = "muted allocation-note warn";
-    note.textContent = `${t("positions.marginNote")} ${fmtMoneySigned(cash)}`;
-  } else {
-    note.textContent = "";
-    note.className = "muted allocation-note";
+  if (note) {
+    if (cash < 0) {
+      note.className = "muted allocation-note warn";
+      note.textContent = `${t("positions.marginNote")} ${fmtMoneySigned(cash)}`;
+    } else {
+      note.textContent = "";
+      note.className = "muted allocation-note";
+    }
   }
 }
 
@@ -1334,6 +1446,15 @@ function renderBySymbol(bySymbol) {
         },
         y: { grid: { display: false }, ticks: { font: { size: 11 } } },
       },
+      onClick: (_evt, els) => {
+        if (!els.length) return;
+        const r = rows[els[0].index];
+        if (r) selectSymbol(r.symbol, r.assetCategory);
+      },
+      onHover: (evt, els) => {
+        evt.native && evt.native.target && (evt.native.target.style.cursor =
+          els.length ? "pointer" : "default");
+      },
     },
   });
 }
@@ -1348,8 +1469,8 @@ function renderBySymbolTable(bySymbol) {
     tbody.innerHTML = `<tr><td colspan="7" class="empty">${t("empty.noData")}</td></tr>`;
     return;
   }
-  tbody.innerHTML = rows.map(r => `
-    <tr>
+  tbody.innerHTML = rows.map((r, i) => `
+    <tr data-row-idx="${i}">
       <td><strong>${shortSymbol(r.symbol, r.assetCategory)}</strong></td>
       <td><span class="ccy-badge">${r.assetCategory || ""}</span></td>
       <td class="num">${r.tradeCount}</td>
@@ -1357,6 +1478,229 @@ function renderBySymbolTable(bySymbol) {
       <td class="num ${signClass(r.realizedPnlInBase)}">${fmtMoney(r.realizedPnlInBase)}</td>
       <td class="num">${fmtMoneyCcy(r.commission, "")}</td>
       <td><span class="ccy-badge">${r.currency || ""}</span></td>
+    </tr>
+  `).join("");
+  // 点击行 → 选中该 ticker，展开 Symbol Detail
+  tbody.querySelectorAll("tr[data-row-idx]").forEach(tr => {
+    tr.addEventListener("click", () => {
+      const idx = +tr.dataset.rowIdx;
+      const r = rows[idx];
+      if (r) selectSymbol(r.symbol, r.assetCategory);
+    });
+  });
+}
+
+/* ─────────────── Symbol Detail (candlestick + trade history) ─────────────── */
+
+function underlyingOf(sym) {
+  if (!sym) return "";
+  return / /.test(sym) ? sym.split(/\s+/)[0] : sym;
+}
+
+function selectSymbol(sym, cat) {
+  const underlying = underlyingOf(sym);
+  state.selectedSymbol = underlying;
+  state.selectedSymbolCategory = cat || "";
+  renderSymbolDetail();
+  const card = document.getElementById("symbolDetailCard");
+  if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function clearSelectedSymbol() {
+  state.selectedSymbol = null;
+  const card = document.getElementById("symbolDetailCard");
+  if (card) card.classList.add("hidden");
+  destroyChart("candle");
+}
+
+async function renderSymbolDetail() {
+  const sym = state.selectedSymbol;
+  const card = document.getElementById("symbolDetailCard");
+  if (!card) return;
+  if (!sym) { card.classList.add("hidden"); return; }
+  card.classList.remove("hidden");
+
+  document.getElementById("symbolDetailTicker").textContent = sym;
+  const meta = document.getElementById("symbolDetailMeta");
+  if (meta) meta.textContent = "";   // 默认不显示 meta，只在 error 时复用
+
+  // Trade history table（用 recentTrades，按 underlyingSymbol 匹配，包括期权）
+  const all = (state.data && state.data.metrics && state.data.metrics.recentTrades) || [];
+  const myTrades = all
+    .filter(tr => underlyingOf(tr.symbol) === sym)
+    .sort((a, b) => (b.dateTime || "").localeCompare(a.dateTime || ""));
+  renderSymbolTradesTable(myTrades);
+
+  // 先算「交易时间窗口」——还没拿 candle 就能算
+  const DAY = 24 * 3600 * 1000;
+  const tradeTs = [];
+  for (const tr of myTrades) {
+    const ts = parseTradeDT(tr.dateTime);
+    if (ts && tr.tradePrice != null) tradeTs.push(ts.getTime());
+  }
+  let xMin = null, xMax = null, spanMs = null;
+  if (tradeTs.length) {
+    const minT = Math.min(...tradeTs);
+    const maxT = Math.max(...tradeTs);
+    const rawSpan = Math.max(maxT - minT, 14 * DAY);   // 单笔/同日成交给两周窗
+    const pad = Math.max(rawSpan * 0.15, 7 * DAY);
+    xMin = minT - pad;
+    xMax = maxT + pad;
+    spanMs = xMax - xMin;
+  }
+
+  // Candlestick chart — 异步加载。窗口 ≤ 58 天先试 5m 高分辨率，失败回落到 1h × 2y。
+  destroyChart("candle");
+  const ctx = document.getElementById("candlestickChart");
+  if (!ctx) return;
+  const cssBg = getComputedStyle(document.documentElement).getPropertyValue("--bg-card").trim() || "#fff";
+  const th = chartTheme();
+  // 临时占位
+  charts.candle = new Chart(ctx, {
+    type: "bar",
+    data: { labels: ["loading..."], datasets: [{ data: [0], backgroundColor: th.grid }] },
+    options: { plugins: { legend: { display: false }, tooltip: { enabled: false } } },
+  });
+
+  async function tryFetch(suffix) {
+    const res = await fetch(`./data/prices/${encodeURIComponent(sym)}${suffix}.json?t=${Date.now()}`);
+    if (!res.ok) return null;
+    return await res.json();
+  }
+
+  let payload = null;
+  try {
+    if (spanMs != null && spanMs <= 58 * DAY) {
+      payload = await tryFetch(".5m");                   // 短窗：先 5m
+    }
+    if (!payload) {
+      payload = await tryFetch("");                       // 兜底 1h
+    }
+  } catch (e) {
+    destroyChart("candle");
+    if (meta) meta.textContent = t("bySymbol.priceLoadFail") + e.message;
+    return;
+  }
+  if (!payload || !(payload.candles || []).length) {
+    destroyChart("candle");
+    if (meta) meta.textContent = t("bySymbol.noPrices").replace("{sym}", sym);
+    return;
+  }
+
+  const candles = payload.candles;
+
+  // 5m 文件只有 60 天数据；若 xMin 落在它之前，把 xMin 收紧到 candle 起点
+  if (xMin != null) {
+    xMin = Math.max(xMin, candles[0].t);
+    xMax = Math.min(xMax, candles[candles.length - 1].t);
+  }
+
+  // 构造 buy/sell 散点
+  const buyPts = [];
+  const sellPts = [];
+  for (const tr of myTrades) {
+    const ts = parseTradeDT(tr.dateTime);
+    if (!ts || tr.tradePrice == null) continue;
+    const pt = { x: ts.getTime(), y: tr.tradePrice };
+    if ((tr.buySell || "").toUpperCase().startsWith("B")) buyPts.push(pt);
+    else sellPts.push(pt);
+  }
+
+  destroyChart("candle");
+  charts.candle = new Chart(ctx, {
+    type: "candlestick",
+    data: {
+      datasets: [
+        {
+          label: sym,
+          data: candles.map(c => ({ x: c.t, o: c.o, h: c.h, l: c.l, c: c.c })),
+          borderColor: th.text,
+          color: { up: th.green, down: th.red, unchanged: th.text },
+          backgroundColors: {
+            up: th.green + "33", down: th.red + "33", unchanged: th.grid,
+          },
+          borderColors: { up: th.green, down: th.red, unchanged: th.text },
+        },
+        {
+          type: "scatter",
+          label: t("bySymbol.buy"),
+          data: buyPts,
+          backgroundColor: th.green,
+          borderColor: cssBg,
+          borderWidth: 1.5,
+          pointStyle: "triangle",
+          radius: 8,
+          hoverRadius: 11,
+        },
+        {
+          type: "scatter",
+          label: t("bySymbol.sell"),
+          data: sellPts,
+          backgroundColor: th.red,
+          borderColor: cssBg,
+          borderWidth: 1.5,
+          pointStyle: "triangle",
+          rotation: 180,
+          radius: 8,
+          hoverRadius: 11,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: true, position: "top", labels: { boxWidth: 14, font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            label: (c) => {
+              if (c.dataset.type === "scatter") {
+                return `${c.dataset.label} @ $${fmtNum(c.parsed.y, 2)}`;
+              }
+              const v = c.raw;
+              return `O ${fmtNum(v.o, 2)}  H ${fmtNum(v.h, 2)}  L ${fmtNum(v.l, 2)}  C ${fmtNum(v.c, 2)}`;
+            },
+          },
+        },
+        datalabels: { display: false },
+      },
+      scales: {
+        x: {
+          type: "timeseries",
+          time: {
+            // 窗口越短，tick 单位越细：< 3 天用小时，< 60 天用天，再大用月
+            unit: (xMin && xMax)
+              ? ((xMax - xMin) < 3 * DAY ? "hour"
+                : (xMax - xMin) < 60 * DAY ? "day" : "month")
+              : "day",
+          },
+          grid: { color: th.grid },
+          ...(xMin != null ? { min: xMin } : {}),
+          ...(xMax != null ? { max: xMax } : {}),
+        },
+        y: { grid: { color: th.grid }, ticks: { callback: v => "$" + fmtNum(v, 2) } },
+      },
+    },
+  });
+}
+
+function renderSymbolTradesTable(trades) {
+  const tbody = document.querySelector("#symbolTradesTable tbody");
+  if (!trades || !trades.length) {
+    tbody.innerHTML = `<tr><td colspan="9" class="empty">${t("empty.noData")}</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = trades.map(tr => `
+    <tr>
+      <td>${tr.dateTime || ""}</td>
+      <td><strong>${shortSymbol(tr.symbol, tr.assetCategory) || ""}</strong></td>
+      <td><span class="ccy-badge">${tr.assetCategory || ""}</span></td>
+      <td>${tr.buySell || ""}</td>
+      <td class="num">${fmtNum(tr.quantity, 0)}</td>
+      <td class="num">${fmtMoneyCcy(tr.tradePrice, "")}</td>
+      <td class="num">${fmtMoneyCcy(tr.ibCommission, "")}</td>
+      <td class="num ${signClass(tr.realizedPnlInBase)}">${tr.realizedPnlInBase == null ? "—" : fmtMoney(tr.realizedPnlInBase)}</td>
+      <td><span class="ccy-badge">${tr.currency || ""}</span></td>
     </tr>
   `).join("");
 }
@@ -1411,6 +1755,7 @@ function renderAll() {
   renderDrawdownChart(m.daily || []);
   renderEquityStats(m.overall || {});
   renderDaily();
+  renderSelectedDay();
   renderPositionsKpis(m.accountSummary);
   renderPositions(m.positions || []);
   renderAllocation(m.positions || [], m.sectorBreakdown || [], m.accountSummary || {});
@@ -1485,6 +1830,12 @@ function wireControls() {
       renderTrades();
     });
   }
+  const closeDay = document.getElementById("closeDayPositions");
+  if (closeDay) closeDay.addEventListener("click", clearSelectedDay);
+
+  const closeSym = document.getElementById("closeSymbolDetail");
+  if (closeSym) closeSym.addEventListener("click", clearSelectedSymbol);
+
   const topNSel = document.getElementById("bySymbolTopNSelect");
   if (topNSel) {
     topNSel.value = state.bySymbolTopN;

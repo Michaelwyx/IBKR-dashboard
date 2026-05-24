@@ -377,6 +377,39 @@ def sector_breakdown(positions):
     return rows
 
 
+def account_summary_by_date(equity_rows):
+    """每个 reportDate 的账户总览，跨账户求和。
+       结构：{YYYYMMDD: {totalNlv, totalCash, totalMarketValue, positionPctOfNav,
+                          cashPctOfNav, asOf}}"""
+    if not equity_rows:
+        return {}
+    by_date = {}     # date -> {acc: row}
+    for r in equity_rows:
+        acc = r.get("accountId", "")
+        rd = r.get("reportDate", "")
+        if not acc or not rd:
+            continue
+        by_date.setdefault(rd, {})[acc] = r
+
+    out = {}
+    for rd, by_acc in by_date.items():
+        nlv = 0.0
+        cash = 0.0
+        for acc, r in by_acc.items():
+            nlv += to_float(r.get("total")) or 0.0
+            cash += to_float(r.get("cash")) or 0.0
+        mv = nlv - cash
+        out[rd] = {
+            "totalNlv": round(nlv, 2),
+            "totalCash": round(cash, 2),
+            "totalMarketValue": round(mv, 2),
+            "positionPctOfNav": round(mv / nlv * 100, 2) if nlv else None,
+            "cashPctOfNav": round(cash / nlv * 100, 2) if nlv else None,
+            "asOf": rd,
+        }
+    return out
+
+
 def account_summary(equity_rows):
     """从 EquitySummaryInBase 最新一天的快照算账户总览。
     每行已经是 base currency；多账户取各账户的最新 reportDate 后跨账户求和。"""
@@ -423,7 +456,7 @@ def open_positions(latest):
     这里按 (accountId) 取该账户最新的 reportDate，得到「当前持仓」。
     多币种持仓（如日股 285A.T 单位是 JPY）通过 fxRateToBase 折算到基础货币用于汇总。"""
     if not latest or "sections" not in latest:
-        return [], [note("POSITIONS_NO_LATEST_JSON",
+        return [], {}, [note("POSITIONS_NO_LATEST_JSON",
             "未找到最新拉取 JSON（json/*_latest.json），跳过持仓快照。",
             "Latest pull JSON (json/*_latest.json) not found — positions skipped.")]
     secs = latest["sections"]
@@ -503,6 +536,18 @@ def open_positions(latest):
             # 同一账户同一标的还可能因 multi-leg / put-call 出现多行——这是合理的，不做合并。
             rows.sort(key=lambda x: (x["positionValueInBase"] is None, -(x["positionValueInBase"] or 0)))
 
+            # 同一份原始 raw 也按 reportDate 分组——这样 dashboard 可以在 Daily P&L tab
+            # 点击某一天后秒级查到当日持仓快照（无需后端再算）。
+            by_date = {}
+            for r in raw:
+                d = r.get("reportDate")
+                if not d:
+                    continue
+                by_date.setdefault(d, []).append(r)
+            for d in by_date:
+                by_date[d].sort(key=lambda x: (x.get("positionValueInBase") is None,
+                                               -(x.get("positionValueInBase") or 0)))
+
             n_notes = []
             if len(raw) > len(rows):
                 n_notes.append(note("POSITIONS_DEDUPED",
@@ -519,8 +564,8 @@ def open_positions(latest):
                     "Positions span multiple currencies (%s). positionValue / unrealizedPnl show "
                     "native values; *InBase fields are normalized via fxRateToBase."
                     % ", ".join(currencies)))
-            return rows, n_notes
-    return [], [note("POSITIONS_MISSING_SECTION",
+            return rows, by_date, n_notes
+    return [], {}, [note("POSITIONS_MISSING_SECTION",
         "最近一次拉取里没有 OpenPositions section——请在 Flex Query 里勾选 'Open Positions'。",
         "Latest pull has no OpenPositions section — check 'Open Positions' in your Flex Query.")]
 
@@ -587,15 +632,19 @@ def main():
 
     t_overall, by_symbol, t_notes = trade_metrics(trades)
     e_overall, daily, by_account, e_notes = equity_metrics(equity, nav)
-    positions, p_notes = open_positions(latest_json)
+    positions, positions_by_date, p_notes = open_positions(latest_json)
     rt = recent_trades(trades, n=args.recent_n)
     acct_summary = account_summary(equity)
+    acct_summary_by_date = account_summary_by_date(equity)
 
-    # Sector 标签：从仓库根目录的 sectors.json 读
+    # Sector 标签：从仓库根目录的 sectors.json 读。给当前持仓和所有历史快照都贴一下。
     sector_map = load_sectors(os.path.dirname(os.path.abspath(args.config))
                               if args.config else os.path.dirname(os.path.abspath(__file__)))
     for p in positions:
         p["sector"] = resolve_sector(p, sector_map)
+    for d in positions_by_date:
+        for p in positions_by_date[d]:
+            p["sector"] = resolve_sector(p, sector_map)
     sec_break = sector_breakdown(positions)
 
     metrics = {
@@ -606,11 +655,13 @@ def main():
         "accountIds": (latest_json or {}).get("accountIds", []),
         "overall": {**t_overall, **e_overall},
         "accountSummary": acct_summary,
+        "accountSummaryByDate": acct_summary_by_date,
         "sectorBreakdown": sec_break,
         "bySymbol": by_symbol,
         "daily": daily,
         "byAccount": by_account,
         "positions": positions,
+        "positionsByDate": positions_by_date,
         "recentTrades": rt,
         "notes": t_notes + e_notes + p_notes,
     }

@@ -44,18 +44,22 @@ echo "config: $CONFIG"
 echo "==================================================="
 
 if [[ $NO_PULL -eq 1 ]]; then
-  echo "[1/3] 跳过拉取 (--no-pull)"
+  echo "[1/4] 跳过拉取 (--no-pull)"
 else
-  echo "[1/3] 从 IBKR Flex 拉取报表 ..."
+  echo "[1/4] 从 IBKR Flex 拉取报表 ..."
   python3 ibkr_flex_pull.py -c "$CONFIG"
 fi
 
 echo
-echo "[2/3] 计算指标 ..."
+echo "[2/4] 计算指标 ..."
 python3 analytics.py -c "$CONFIG"
 
 echo
-echo "[3/3] 构建 dashboard ..."
+echo "[3/4] 拉 Yahoo 1h 行情（Symbol Detail 候选）..."
+python3 fetch_prices.py -c "$CONFIG" || echo "  (注：部分 ticker Yahoo 不收录，可忽略)"
+
+echo
+echo "[4/4] 构建 dashboard ..."
 python3 build_site.py -c "$CONFIG"
 
 echo
