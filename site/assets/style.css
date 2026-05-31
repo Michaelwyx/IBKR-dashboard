@@ -450,6 +450,16 @@ footer span { margin: 0 6px; }
   color: var(--text-muted);
 }
 
+.date-input {
+  background: var(--bg-elev);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 13px;
+  min-height: 28px;
+}
+
 .seg-group {
   display: inline-flex;
   background: var(--bg-elev);

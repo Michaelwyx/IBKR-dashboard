@@ -17,14 +17,24 @@ const I18N = {
     "equity.curve": "权益曲线",
     "equity.drawdown": "回撤",
     "equity.stats": "绩效指标",
-    "kpi.nlv": "当前净清算价值",
-    "kpi.todayPnl": "今日盈亏",
-    "kpi.ytdReturn": "年初至今累计收益率",
+    "equity.range.all": "全部",
+    "equity.range.ytd": "年初至今",
+    "equity.range.3m": "最近三月",
+    "equity.range.1m": "最近一月",
+    "equity.range.custom": "自定义",
+    "equity.range.from": "开始",
+    "equity.range.to": "结束",
+    "kpi.nlv": "区间末 NAV",
+    "kpi.todayPnl": "区间盈亏",
+    "kpi.ytdReturn": "时间加权收益率",
     "stat.tradingDays": "交易日数",
-    "stat.navStart": "本金",
-    "stat.navEnd": "当前 NAV",
+    "stat.principal": "本金（净转入）",
+    "stat.navStart": "期初 NAV",
+    "stat.navEnd": "区间末 NAV",
+    "stat.netContribution": "区间净转入",
     "stat.cumPnl": "累计盈亏",
-    "stat.cumPnlPct": "累计收益率",
+    "stat.returnOnPrincipal": "按本金收益率",
+    "stat.timeWeightedReturn": "时间加权收益率",
     "stat.maxDD": "最大回撤",
     "stat.sharpe": "年化夏普",
     "stat.realized": "已实现盈亏",
@@ -139,14 +149,24 @@ const I18N = {
     "equity.curve": "Equity Curve",
     "equity.drawdown": "Drawdown",
     "equity.stats": "Performance Statistics",
-    "kpi.nlv": "Current Net Liquidation Value",
-    "kpi.todayPnl": "Today's P&L",
-    "kpi.ytdReturn": "Cumulative Return YTD",
+    "equity.range.all": "All",
+    "equity.range.ytd": "YTD",
+    "equity.range.3m": "Last 3 Months",
+    "equity.range.1m": "Last Month",
+    "equity.range.custom": "Custom",
+    "equity.range.from": "From",
+    "equity.range.to": "To",
+    "kpi.nlv": "Range-end NAV",
+    "kpi.todayPnl": "Range P&L",
+    "kpi.ytdReturn": "Time-weighted Return",
     "stat.tradingDays": "Trading days",
-    "stat.navStart": "Principal",
-    "stat.navEnd": "Current NAV",
+    "stat.principal": "Principal (net contribution)",
+    "stat.navStart": "Starting NAV",
+    "stat.navEnd": "Range-end NAV",
+    "stat.netContribution": "Net contribution",
     "stat.cumPnl": "Cumulative P&L",
-    "stat.cumPnlPct": "Cumulative return",
+    "stat.returnOnPrincipal": "Return on principal",
+    "stat.timeWeightedReturn": "Time-weighted return",
     "stat.maxDD": "Max drawdown",
     "stat.sharpe": "Annualized Sharpe",
     "stat.realized": "Realized P&L",
@@ -258,6 +278,9 @@ const state = {
   lang: localStorage.getItem("ibkr.lang") || "zh",
   theme: localStorage.getItem("ibkr.theme") || "light",
   tab: localStorage.getItem("ibkr.tab") || "equity",
+  equityRange: localStorage.getItem("ibkr.equityRange") || "ytd", // all | ytd | 3m | 1m | custom
+  equityStart: localStorage.getItem("ibkr.equityStart") || "",
+  equityEnd: localStorage.getItem("ibkr.equityEnd") || "",
   granularity: "day",      // day | week | month
   selectedDay: null,       // 用户点击 daily P&L 后选中的日期 (ISO "2026-05-22")
   selectedSymbol: null,    // 用户点击 By Symbol 后选中的 ticker（已转成 underlying）
@@ -387,6 +410,87 @@ function destroyChart(id) {
 }
 
 /* ─────────────────────────── Equity tab ─────────────────────────── */
+function equityRangeBounds(daily) {
+  if (!daily || !daily.length) return { start: "", end: "" };
+  const first = daily[0].date;
+  const last = daily[daily.length - 1].date;
+  const endObj = parseISODate(last);
+  let start = first;
+  if (state.equityRange === "ytd" && endObj) {
+    start = `${endObj.getUTCFullYear()}0101`;
+  } else if (state.equityRange === "3m" && endObj) {
+    start = formatISODate(addMonthsUTC(endObj, -3)).replaceAll("-", "");
+  } else if (state.equityRange === "1m" && endObj) {
+    start = formatISODate(addMonthsUTC(endObj, -1)).replaceAll("-", "");
+  } else if (state.equityRange === "custom") {
+    start = compactDate(state.equityStart) || first;
+    return { start, end: compactDate(state.equityEnd) || last };
+  }
+  return { start, end: last };
+}
+
+function filteredEquityDaily(daily) {
+  if (!daily || !daily.length) return [];
+  const bounds = equityRangeBounds(daily);
+  return daily.filter(d => {
+    const c = compactDate(d.date);
+    return c >= bounds.start && c <= bounds.end;
+  });
+}
+
+function summarizeEquityRange(overall, daily) {
+  if (!daily || !daily.length) return overall || {};
+  const first = daily[0];
+  const last = daily[daily.length - 1];
+  const rowsAfterStart = daily.slice(1);
+  const contribution = rowsAfterStart.reduce((sum, d) => sum + (d.netContribution || 0), 0);
+  const pnl = (last.total || 0) - (first.total || 0) - contribution;
+  const returns = rowsAfterStart
+    .map(d => d.dayReturnPct == null ? null : d.dayReturnPct / 100)
+    .filter(r => r != null && Number.isFinite(r));
+  let twr = null;
+  if (returns.length) {
+    let growth = 1;
+    for (const r of returns) growth *= (1 + r);
+    twr = (growth - 1) * 100;
+  }
+  let peak = first.total || 0;
+  let maxDD = 0;
+  let maxDDPct = 0;
+  for (const d of daily) {
+    const v = d.total;
+    if (v == null) continue;
+    peak = Math.max(peak, v);
+    const dd = v - peak;
+    if (dd < maxDD) maxDD = dd;
+    if (peak > 0) maxDDPct = Math.min(maxDDPct, dd / peak * 100);
+  }
+  return {
+    ...(overall || {}),
+    navStart: first.total,
+    navEnd: last.total,
+    principal: contribution,
+    netContribution: contribution,
+    cumulativePnlFromEquity: pnl,
+    returnOnPrincipalPct: contribution ? (pnl / contribution) * 100 : null,
+    timeWeightedReturnPct: twr,
+    maxDrawdown: maxDD,
+    maxDrawdownPct: maxDDPct,
+    tradingDays: daily.length,
+  };
+}
+
+function renderEquityControls(daily) {
+  document.querySelectorAll('[data-control="equityRange"] .seg').forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.value === state.equityRange);
+  });
+  const bounds = equityRangeBounds(daily || []);
+  const start = document.getElementById("equityStart");
+  const end = document.getElementById("equityEnd");
+  if (start && state.equityRange !== "custom") start.value = inputDate(bounds.start);
+  if (end && state.equityRange !== "custom") end.value = inputDate(bounds.end);
+}
+
 function renderEquityChart(daily) {
   destroyChart("equity");
   if (!daily || !daily.length) return;
@@ -470,22 +574,9 @@ function ytdAnchor(daily) {
 function renderEquityKpis(o, daily) {
   const root = document.getElementById("equityKpis");
   if (!root) return;
-  const cumPnl = o.cumulativePnlFromEquity;
-  const cumPnlPct = (cumPnl != null && o.navStart) ? (cumPnl / o.navStart) * 100 : null;
-
-  // 今日盈亏：daily 序列最后一笔
-  const latest = (daily && daily.length) ? daily[daily.length - 1] : null;
-  const todayPnl = latest ? latest.dayPnl : null;
-  const todayPct = latest ? latest.dayReturnPct : null;
-  const todayDate = latest ? latest.date : null;
-
-  // YTD return：基于最近一笔所在年份第一个数据点
-  const ytdStart = ytdAnchor(daily);
-  let ytdPct = null, ytdDollar = null;
-  if (ytdStart && latest && ytdStart.total) {
-    ytdDollar = latest.total - ytdStart.total;
-    ytdPct = (latest.total / ytdStart.total - 1) * 100;
-  }
+  const pnl = o.cumulativePnlFromEquity;
+  const twr = o.timeWeightedReturnPct;
+  const principalReturn = o.returnOnPrincipalPct;
 
   const cards = [
     {
@@ -495,17 +586,17 @@ function renderEquityKpis(o, daily) {
     },
     {
       label: t("kpi.todayPnl"),
-      value: fmtMoneySigned(todayPnl),
-      valueClass: signClass(todayPnl),
-      sub: todayPct != null ? `${todayPct >= 0 ? "+" : ""}${todayPct.toFixed(2)}%` : "",
-      subClass: signClass(todayPct),
+      value: fmtMoneySigned(pnl),
+      valueClass: signClass(pnl),
+      sub: `${t("stat.netContribution")}: ${fmtMoneySigned(o.netContribution || 0)}`,
+      subClass: signClass(o.netContribution),
     },
     {
       label: t("kpi.ytdReturn"),
-      value: ytdPct != null ? `${ytdPct >= 0 ? "+" : ""}${ytdPct.toFixed(2)}%` : "—",
-      valueClass: signClass(ytdPct),
-      sub: ytdDollar != null ? fmtMoneySigned(ytdDollar) : "",
-      subClass: signClass(ytdDollar),
+      value: twr != null ? `${twr >= 0 ? "+" : ""}${twr.toFixed(2)}%` : "—",
+      valueClass: signClass(twr),
+      sub: principalReturn != null ? `${t("stat.returnOnPrincipal")}: ${principalReturn >= 0 ? "+" : ""}${principalReturn.toFixed(2)}%` : "",
+      subClass: signClass(principalReturn),
     },
   ];
 
@@ -520,14 +611,17 @@ function renderEquityKpis(o, daily) {
 
 function renderEquityStats(o) {
   const cumPnl = o.cumulativePnlFromEquity;
-  const cumPnlPct = (cumPnl != null && o.navStart) ? (cumPnl / o.navStart) * 100 : null;
 
   const rows = [
+    ["stat.principal",    fmtMoney(o.principal), ""],
     ["stat.navStart",     fmtMoney(o.navStart), ""],
     ["stat.navEnd",       fmtMoney(o.navEnd), ""],
+    ["stat.netContribution", fmtMoneySigned(o.netContribution || 0), signClass(o.netContribution)],
     ["stat.cumPnl",       fmtMoney(cumPnl), signClass(cumPnl)],
-    ["stat.cumPnlPct",    cumPnlPct != null ? `${cumPnlPct >= 0 ? "+" : ""}${cumPnlPct.toFixed(2)}%` : "—",
-                          signClass(cumPnl)],
+    ["stat.returnOnPrincipal", o.returnOnPrincipalPct != null ? `${o.returnOnPrincipalPct >= 0 ? "+" : ""}${o.returnOnPrincipalPct.toFixed(2)}%` : "—",
+                          signClass(o.returnOnPrincipalPct)],
+    ["stat.timeWeightedReturn", o.timeWeightedReturnPct != null ? `${o.timeWeightedReturnPct >= 0 ? "+" : ""}${o.timeWeightedReturnPct.toFixed(2)}%` : "—",
+                          signClass(o.timeWeightedReturnPct)],
     ["stat.tradingDays",  o.tradingDays != null ? o.tradingDays : "—", ""],
     ["stat.tradeCount",   o.tradeCount != null ? o.tradeCount.toLocaleString() : "—", "", "tradeCount.hint"],
     ["stat.currencies",   (o.currenciesTraded || []).join(", ") || "—", ""],
@@ -556,6 +650,19 @@ function parseISODate(s) {
 function formatISODate(d) {
   const y = d.getUTCFullYear(), m = String(d.getUTCMonth()+1).padStart(2,"0"), day = String(d.getUTCDate()).padStart(2,"0");
   return `${y}-${m}-${day}`;
+}
+
+function compactDate(s) {
+  return (s || "").replaceAll("-", "").slice(0, 8);
+}
+
+function inputDate(s) {
+  const c = compactDate(s);
+  return c.length === 8 ? `${c.slice(0,4)}-${c.slice(4,6)}-${c.slice(6,8)}` : "";
+}
+
+function addMonthsUTC(d, months) {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + months, d.getUTCDate()));
 }
 
 function isoWeekKey(d) {
@@ -1749,11 +1856,14 @@ function renderAll() {
   applyChartDefaults();
   if (!state.data) return;
   const m = state.data.metrics || {};
+  const equityDaily = filteredEquityDaily(m.daily || []);
+  const equityOverall = summarizeEquityRange(m.overall || {}, equityDaily);
   renderHeader(state.data);
-  renderEquityKpis(m.overall || {}, m.daily || []);
-  renderEquityChart(m.daily || []);
-  renderDrawdownChart(m.daily || []);
-  renderEquityStats(m.overall || {});
+  renderEquityControls(m.daily || []);
+  renderEquityKpis(equityOverall, equityDaily);
+  renderEquityChart(equityDaily);
+  renderDrawdownChart(equityDaily);
+  renderEquityStats(equityOverall);
   renderDaily();
   renderSelectedDay();
   renderPositionsKpis(m.accountSummary);
@@ -1808,8 +1918,12 @@ function wireControls() {
         group.querySelectorAll(".seg").forEach(s => s.classList.remove("active"));
         seg.classList.add("active");
         state[control] = seg.dataset.value;
+        if (control === "equityRange") {
+          localStorage.setItem("ibkr.equityRange", state.equityRange);
+          renderAll();
+        }
         // 路由：哪个 control 触发哪个重渲染
-        if (control === "granularity") renderDaily();
+        else if (control === "granularity") renderDaily();
         else if (control === "tradeCategory") renderTrades();
         else if (control === "bySymbolType") {
           renderBySymbol((state.data && state.data.metrics && state.data.metrics.bySymbol) || []);
@@ -1830,8 +1944,31 @@ function wireControls() {
       renderTrades();
     });
   }
-  const closeDay = document.getElementById("closeDayPositions");
-  if (closeDay) closeDay.addEventListener("click", clearSelectedDay);
+	  const closeDay = document.getElementById("closeDayPositions");
+	  if (closeDay) closeDay.addEventListener("click", clearSelectedDay);
+
+  const equityStart = document.getElementById("equityStart");
+  const equityEnd = document.getElementById("equityEnd");
+  if (equityStart) {
+    equityStart.value = inputDate(state.equityStart);
+    equityStart.addEventListener("change", () => {
+      state.equityStart = compactDate(equityStart.value);
+      state.equityRange = "custom";
+      localStorage.setItem("ibkr.equityStart", state.equityStart);
+      localStorage.setItem("ibkr.equityRange", state.equityRange);
+      renderAll();
+    });
+  }
+  if (equityEnd) {
+    equityEnd.value = inputDate(state.equityEnd);
+    equityEnd.addEventListener("change", () => {
+      state.equityEnd = compactDate(equityEnd.value);
+      state.equityRange = "custom";
+      localStorage.setItem("ibkr.equityEnd", state.equityEnd);
+      localStorage.setItem("ibkr.equityRange", state.equityRange);
+      renderAll();
+    });
+  }
 
   const closeSym = document.getElementById("closeSymbolDetail");
   if (closeSym) closeSym.addEventListener("click", clearSelectedSymbol);

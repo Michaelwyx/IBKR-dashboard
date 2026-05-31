@@ -51,6 +51,23 @@
   <main>
     <!-- Equity tab -->
     <section class="tab-panel" id="panel-equity">
+      <div class="toolbar">
+        <div class="seg-group" data-control="equityRange" role="tablist">
+          <button class="seg active" data-value="ytd" data-i18n="equity.range.ytd">YTD</button>
+          <button class="seg" data-value="3m" data-i18n="equity.range.3m">3M</button>
+          <button class="seg" data-value="1m" data-i18n="equity.range.1m">1M</button>
+          <button class="seg" data-value="all" data-i18n="equity.range.all">All</button>
+          <button class="seg" data-value="custom" data-i18n="equity.range.custom">Custom</button>
+        </div>
+        <label class="toolbar-label">
+          <span data-i18n="equity.range.from">From</span>
+          <input id="equityStart" class="date-input" type="date" />
+        </label>
+        <label class="toolbar-label">
+          <span data-i18n="equity.range.to">To</span>
+          <input id="equityEnd" class="date-input" type="date" />
+        </label>
+      </div>
       <div class="kpi-row" id="equityKpis"></div>
 
       <div class="card">
