@@ -97,8 +97,8 @@ binds to `127.0.0.1` only.
 
 ### 2. Generate a Flex Web Service token
 
-1. Client Portal → **Settings → Account Settings**
-2. Find **Flex Web Service**, enable it, generate a token
+1. **Client Portal** → **Performance & Reports** → **Flex Queries**
+2. Find **Flex Web Service Configuration**, enable it, generate a token
 3. Copy the token (a long number). Tokens expire (max ~1 year) — re-generate when needed
 
 ### 3. Configure locally
@@ -107,6 +107,7 @@ binds to `127.0.0.1` only.
 git clone git@github.com:Michaelwyx/IBKR-dashboard.git
 cd IBKR-dashboard
 cp config.example.json config.json
+cp sectors.example.json sectors.json
 ```
 
 Edit `config.json`:

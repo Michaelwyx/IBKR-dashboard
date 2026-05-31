@@ -1,6 +1,7 @@
 # ─── Sensitive ────────────────────────────────────────────
 # IBKR Flex token + Query ID
 config.json
+sectors.json
 
 # Raw account data pulled from IBKR
 data/
