@@ -7,6 +7,12 @@ sectors.json
 data/
 ibkr-data/
 
+# Backup of real data taken before generating demo data — NEVER commit (real holdings)
+_screenshot_backup/
+
+# Local-only demo-data generator (used to make the README screenshots) — not committed
+gen_dummy_data.py
+
 # Built dashboard with real numbers
 site/data/
 
@@ -23,6 +29,11 @@ daily.log
 *.heic
 NOTES.md
 notes.md
+
+# ...but DO commit the README screenshots — these are 100% synthetic demo data,
+# so there is nothing private to leak.
+!docs/screenshots/
+!docs/screenshots/*.png
 
 # ─── Runtime / OS ─────────────────────────────────────────
 .serve.pid

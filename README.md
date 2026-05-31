@@ -8,16 +8,32 @@ interactive dashboard served on `localhost`.
 Everything — data, analysis, dashboard — stays on your machine. The HTTP server
 binds to `127.0.0.1` only.
 
+> 📊 **The screenshots below use anonymized demo data, not a real account** — a
+> synthetic ~30-ticker portfolio (roughly **3× a $25k principal** over ~6 months,
+> **~74% invested** with a cash buffer, **−12% max drawdown**, ~76% win rate).
+> Sectors are an illustrative **半导体 / 存储 / CPO / 太空 + 其他** split. The numbers
+> are fabricated to exercise the dashboard — not real holdings, not advice.
+
 ## Features
 
 ### Equity tab
-- 3 KPI cards: **Current Net Liquidation Value**, **Today's P&L** (with %),
-  **Cumulative Return YTD** (with $)
+
+![Equity tab — demo data](docs/screenshots/equity.png)
+
+- Date-range selector: **YTD / Last 3 Months / Last Month / All / Custom** (with date inputs)
+- 3 KPI cards: **Range-end NAV**, **Range P&L** (with net contribution),
+  **Time-weighted return** (with return-on-principal)
 - Equity curve + drawdown (low-saturation palette)
-- Full performance statistics list (Principal, NAV, cumulative P&L, drawdown,
-  Sharpe, win rate, realized P&L, commissions, currencies traded)
+- Full performance statistics: **Principal (net contribution)**, starting NAV,
+  cumulative P&L, **return on principal**, **time-weighted return**, drawdown,
+  Sharpe, win rate, realized P&L, commissions, currencies traded
+- **Deposits / withdrawals are excluded** from P&L, returns and contribution — a
+  mid-period top-up/withdrawal in the demo does not show up as a gain or loss
 
 ### Daily P&L tab
+
+![Daily P&L — demo data](docs/screenshots/daily.png)
+
 - Bar chart + traditional month-by-month calendar heatmap, always side-by-side
 - Granularity toggle: **Day / Week / Month**
 - Day view skips weekends; 4 months per row; colors range from eggshell-red
@@ -27,7 +43,14 @@ binds to `127.0.0.1` only.
   - Sector allocation pie + table **for that date**
   - Full position list **for that date** (same columns as Positions tab)
 
+![Daily P&L date drill-through — demo data](docs/screenshots/daily_detail.png)
+<sub>↑ Demo data. Clicking a date expands that day's snapshot — KPIs, sector pie, and the positions held on that exact date (list truncated here).</sub>
+
 ### Positions tab
+
+![Positions — demo data](docs/screenshots/positions.png)
+<sub>↑ Demo data. 74% invested with a positive cash buffer (no margin); top holdings shown (list truncated).</sub>
+
 - 4 KPI cards: Total NLV / Market Value / Cash / Position % of NAV (with
   negative-cash margin warning)
 - Per-position table:
@@ -40,12 +63,23 @@ binds to `127.0.0.1` only.
     labeled inline on the ring (datalabels plugin)
   - **By Sector** — merged into sectors, with sector names on slices
 
+![Positions allocation — demo data](docs/screenshots/positions_alloc.png)
+<sub>↑ Demo data. The two doughnuts + the per-sector table (4 sectors + 其他 + cash).</sub>
+
 ### Trades tab
+
+![Trades — demo data](docs/screenshots/trades.png)
+<sub>↑ Demo data. Filtered to the last week (the count shows N / total); note the JPY fill on 285A.T.</sub>
+
 - Time-window filter via dropdown (Last Day / Week / Month / 3 Months / YTD)
 - Category filter (All / Stocks / Options)
-- All ~1000+ trades in one place; client-side filter, no re-pull needed
+- Every execution in one place; client-side filter, no re-pull needed
 
 ### By Symbol tab
+
+![By Symbol diverging chart — demo data](docs/screenshots/bySymbol.png)
+<sub>↑ Demo data. Realized P&L per symbol — winners extend right, the few cut losers sit left.</sub>
+
 - **Diverging Top-N chart** — gains right, losses left, sorted by impact
   (smallest loss on top, biggest loss pinned at bottom)
 - Toggle between Stocks vs Options; toggle Top 5 / 10 / All
@@ -57,6 +91,9 @@ binds to `127.0.0.1` only.
   - **Your buy/sell markers** plotted directly on the chart (green ↑ for buys,
     red ↓ for sells, at your actual fill price)
   - Full trade history for that ticker (options auto-grouped to underlying)
+
+![By Symbol candlestick drill-through — demo data](docs/screenshots/bySymbol_detail.png)
+<sub>↑ Demo data. Clicking a symbol opens its candlestick with your buy/sell markers + trade history (truncated here).</sub>
 
 ### Cross-cutting
 - **i18n** — English / 中文 toggle, persisted in localStorage
@@ -89,8 +126,8 @@ binds to `127.0.0.1` only.
    | **Net Asset Value (NAV) in Base** | Required. Parsed as `EquitySummaryInBase`. Drives the Equity Curve, daily P&L series, Today's P&L card, drawdown, Sharpe, and the per-date Cash / Market Value / Position % KPIs. |
    | **Change in NAV** | Recommended. Per-day P&L decomposition (starting/ending, realized, MTM, deposits & withdrawals). Used as a fallback for the equity series and visible in the Notes tab. |
    | **Open Positions** | Required. Drives the Positions tab, the sector pies, and the Daily-P&L click-through (positions on any historical date). |
-   | **Cash Transactions** | Optional. Pulled and archived but not yet rendered in the UI. |
-   | **Transfers** | Optional. Same as above — archived for completeness. |
+   | **Cash Transactions** | Recommended. Supplies **dated** Deposits/Withdrawals so capital flows can be attributed to the right day and excluded from P&L (instead of just a period total). |
+   | **Transfers** | Recommended. Dated cash/asset transfers, handled the same way as deposits/withdrawals. |
 
 4. **General Configuration** — these settings make the parser work correctly
    (matches the format ibkr_flex_pull.py expects):
@@ -251,9 +288,11 @@ If you change the Query's Date Period after pulling once, run
   detected.
 - **Win rate / avg win / avg loss**: based on closing trades only (trades that
   carry a non-zero realized P&L); opening trades don't have a P&L yet.
+- **Capital flows**: deposits / withdrawals / transfers are dated from
+  `CashTransactions` + `Transfers` (falling back to `ChangeInNAV`) and **excluded**
+  from daily P&L, cumulative P&L, return-on-principal and time-weighted return.
+  Principal = total inflows − outflows; starting NAV is reported separately.
 - **Drawdown / Sharpe**: based on the NAV time series summed across accounts.
-  Includes deposits/withdrawals — if you have large transfers, prefer the
-  trading P&L decomposition from `ChangeInNAV`.
 - **Today's P&L** (per position): `(mark_today − mark_yesterday) × position × fx`.
   Computed from two consecutive `OpenPositions` snapshots; needs ≥ 2 days of data.
 - **Positions sector**: comes from `sectors.json` (manual mapping). Unknown
