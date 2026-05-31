@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # 本地 dashboard 服务器（常驻后台）。
 # 用法:
 #   ./serve.sh start [port]    后台启动（默认端口 8765），并打开浏览器
@@ -18,16 +18,39 @@ PID_FILE="$PWD/.serve.pid"
 LOG_FILE="$PWD/serve.log"
 
 is_running() {
-  [[ -f "$PID_FILE" ]] || return 1
-  local pid
-  pid=$(cat "$PID_FILE" 2>/dev/null || echo "")
-  [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
+  local pid cmd pids
+  if [[ -f "$PID_FILE" ]]; then
+    pid=$(cat "$PID_FILE" 2>/dev/null || echo "")
+    [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null && return 0
+  fi
+  # 如果 .serve.pid 被删了，但本仓库的 server 还占着端口，就重新写 pid 文件。
+  if command -v lsof >/dev/null 2>&1; then
+    pids=$(lsof -nP -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true)
+    pid=${pids%%$'\n'*}
+    cmd=$(ps -p "${pid:-0}" -o command= 2>/dev/null || true)
+    if [[ "$cmd" == *"$PWD/serve.py"* && "$cmd" == *"--directory $SITE_DIR"* ]]; then
+      echo "$pid" > "$PID_FILE"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+port_is_busy() {
+  local pids
+  command -v lsof >/dev/null 2>&1 || return 1
+  pids=$(lsof -nP -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true)
+  [[ -n "$pids" ]]
 }
 
 cmd_start() {
   if is_running; then
     echo "已在运行 (pid=$(cat "$PID_FILE"))。访问: http://localhost:${PORT}/"
     exit 0
+  fi
+  if port_is_busy; then
+    echo "端口 ${PORT} 已被其他进程占用。可改用其他端口：$0 start <port>" >&2
+    exit 1
   fi
   if [[ ! -f "$SITE_DIR/index.html" ]]; then
     echo "找不到 $SITE_DIR/index.html —— 先确认仓库完整。" >&2

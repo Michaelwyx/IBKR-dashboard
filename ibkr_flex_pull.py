@@ -37,6 +37,8 @@ FLEX_VERSION = "3"
 
 # IBKR 要求程序化访问设置 User-Agent，否则可能被拒。
 DEFAULT_USER_AGENT = "ibkr-flex-puller/1.0 (+python-stdlib)"
+DEFAULT_HTTP_RETRIES = 4
+DEFAULT_HTTP_RETRY_SLEEP = 2.0
 
 # 这些 section 跨运行做累积去重；其余 section 每次只存当次快照。
 # key   = section 标签（FlexStatement 下的子元素 tag）
@@ -59,19 +61,33 @@ log = logging.getLogger("ibkr_flex")
 # --------------------------------------------------------------------------- #
 # HTTP
 # --------------------------------------------------------------------------- #
-def _http_get(url, params, user_agent, timeout=60):
+def _http_get(url, params, user_agent, timeout=60,
+              retries=DEFAULT_HTTP_RETRIES, retry_sleep=DEFAULT_HTTP_RETRY_SLEEP):
     """GET 请求，返回 (status_code, body_text)。带必需的 User-Agent。"""
     query = "&".join("%s=%s" % (k, v) for k, v in params.items())
     full = "%s?%s" % (url, query)
     req = Request(full, headers={"User-Agent": user_agent})
-    try:
-        with urlopen(req, timeout=timeout) as resp:
-            return resp.getcode(), resp.read().decode("utf-8", errors="replace")
-    except HTTPError as e:
-        body = e.read().decode("utf-8", errors="replace") if e.fp else ""
-        return e.code, body
-    except URLError as e:
-        raise RuntimeError("网络错误，无法连接 IBKR Flex 服务: %s" % e.reason)
+    last_error = None
+    for attempt in range(1, retries + 1):
+        try:
+            with urlopen(req, timeout=timeout) as resp:
+                return resp.getcode(), resp.read().decode("utf-8", errors="replace")
+        except HTTPError as e:
+            body = e.read().decode("utf-8", errors="replace") if e.fp else ""
+            if e.code < 500 or attempt == retries:
+                return e.code, body
+            last_error = "HTTP %s" % e.code
+        except URLError as e:
+            last_error = e.reason
+        except OSError as e:
+            last_error = e
+
+        if attempt < retries:
+            log.warning("IBKR HTTP 请求失败（%s/%s）：%s；%.1fs 后重试",
+                        attempt, retries, last_error, retry_sleep)
+            time.sleep(retry_sleep)
+
+    raise RuntimeError("网络错误，无法连接 IBKR Flex 服务: %s" % last_error)
 
 
 def _parse_flex_response(xml_text):
@@ -112,10 +128,28 @@ def request_reference_code(token, query_id, user_agent):
 def fetch_statement(token, reference_code, get_url, user_agent,
                     poll_interval, poll_max_attempts):
     """轮询 GetStatement，直到拿到报表或确定失败。返回报表 XML 文本。"""
+    # IBKR may return a regional GetStatement URL (for example gdcdyn) from
+    # SendRequest. In practice that host can close TLS connections while the
+    # documented ndcdyn endpoint works with the same ReferenceCode, so prefer
+    # the stable default and keep the returned URL as a fallback.
+    get_urls = [GET_STATEMENT_URL]
+    if get_url and get_url not in get_urls:
+        get_urls.append(get_url)
+
     for attempt in range(1, poll_max_attempts + 1):
-        code, body = _http_get(get_url,
-                               {"t": token, "q": reference_code, "v": FLEX_VERSION},
-                               user_agent)
+        last_network_error = None
+        for url in get_urls:
+            try:
+                code, body = _http_get(url,
+                                       {"t": token, "q": reference_code, "v": FLEX_VERSION},
+                                       user_agent)
+                break
+            except RuntimeError as e:
+                last_network_error = e
+                log.warning("GetStatement URL 失败: %s；尝试备用 URL", url)
+        else:
+            raise last_network_error
+
         status, info = _parse_flex_response(body)
         if status is None:
             log.info("报表已就绪（第 %d 次尝试）", attempt)

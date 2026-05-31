@@ -83,6 +83,48 @@ def fetch_one(ticker, interval, range_, timeout=30):
     return candles, None
 
 
+def unique(seq):
+    seen = set()
+    out = []
+    for item in seq:
+        if item and item not in seen:
+            seen.add(item)
+            out.append(item)
+    return out
+
+
+def yahoo_ticker_candidates(sym):
+    """Return Yahoo ticker candidates for an IBKR symbol.
+
+    IBKR often reports Hong Kong tickers as plain numeric symbols (e.g. 7709),
+    while Yahoo needs the market suffix (7709.HK). Keep the cache filename as
+    the IBKR symbol; only the outbound Yahoo request uses candidates.
+    """
+    candidates = [sym]
+    if sym and "." not in sym and sym.isdigit():
+        candidates.extend(["%s.HK" % sym, "%s.T" % sym])
+    return unique(candidates)
+
+
+def range_candidates(interval, range_):
+    """Fallback shorter intraday ranges for newly listed tickers."""
+    candidates = [range_]
+    if interval == "5m":
+        candidates.extend(["30d", "5d"])
+    return unique(candidates)
+
+
+def fetch_with_fallbacks(sym, interval, range_):
+    errors = []
+    for yahoo_sym in yahoo_ticker_candidates(sym):
+        for candidate_range in range_candidates(interval, range_):
+            candles, err = fetch_one(yahoo_sym, interval, candidate_range)
+            if candles and not err:
+                return candles, None, yahoo_sym, candidate_range
+            errors.append("%s/%s: %s" % (yahoo_sym, candidate_range, err or "空"))
+    return None, "; ".join(errors), None, None
+
+
 def collect_symbols(data_dir):
     """从 metrics.json 抽出所有需要拉的标的（持仓 + 全部成交，去重）。
        期权按 underlyingSymbol 归一；cash 跳过。"""
@@ -203,7 +245,7 @@ def main():
                     print("  %s: 缓存 %.1fh，跳过" % (tag, age_h))
                     skipped += 1
                     continue
-            candles, err = fetch_one(sym, interval, range_)
+            candles, err, yahoo_sym, used_range = fetch_with_fallbacks(sym, interval, range_)
             if err or not candles:
                 print("  %s: ✗ %s" % (tag, err or "空"), file=sys.stderr)
                 failed += 1
@@ -211,8 +253,9 @@ def main():
                 continue
             payload = {
                 "ticker": sym,
+                "yahooTicker": yahoo_sym,
                 "interval": interval,
-                "range": range_,
+                "range": used_range,
                 "fetchedAt": now_iso(),
                 "candles": candles,
             }
@@ -220,7 +263,10 @@ def main():
                 json.dump(payload, f)
             first = datetime.fromtimestamp(candles[0]["t"] / 1000, tz=timezone.utc).date()
             last = datetime.fromtimestamp(candles[-1]["t"] / 1000, tz=timezone.utc).date()
-            print("  %s: ✓ %d 根 (%s → %s)" % (tag, len(candles), first, last))
+            source = ""
+            if yahoo_sym != sym or used_range != range_:
+                source = " via %s/%s" % (yahoo_sym, used_range)
+            print("  %s: ✓ %d 根 (%s → %s)%s" % (tag, len(candles), first, last, source))
             ok += 1
             time.sleep(args.delay)
 

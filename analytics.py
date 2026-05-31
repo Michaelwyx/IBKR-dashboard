@@ -56,6 +56,15 @@ def note(code, zh, en):
     return {"code": code, "zh": zh, "en": en}
 
 
+def execution_trades(trades):
+    """Return actual fill rows when Flex includes multiple trade row levels."""
+    levels = {(t.get("levelOfDetail") or "").upper() for t in trades}
+    if "EXECUTION" not in levels:
+        return trades, 0
+    filtered = [t for t in trades if (t.get("levelOfDetail") or "").upper() == "EXECUTION"]
+    return filtered, len(trades) - len(filtered)
+
+
 # --------------------------------------------------------------------------- #
 # 基于逐笔成交的指标（多币种用 fxRateToBase 折算到基础货币）
 # --------------------------------------------------------------------------- #
@@ -65,6 +74,14 @@ def trade_metrics(trades):
         return {}, [], [note("TRADES_MISSING",
             "未找到 trades_cumulative.csv，跳过成交类指标。",
             "trades_cumulative.csv not found — trade metrics skipped.")]
+
+    trades, skipped_non_execution = execution_trades(trades)
+    if skipped_non_execution:
+        notes.append(note("TRADES_EXECUTION_ONLY",
+            "Trades 里同时包含订单、平仓 lot 和汇总行；成交统计已只使用 EXECUTION 行，"
+            "避免重复计算成交金额、佣金和已实现盈亏。",
+            "Trades include order, closed-lot, and summary rows; trade metrics now use only "
+            "EXECUTION rows to avoid double-counting trade money, commissions, and realized P&L."))
 
     realized_field = None
     for cand in ("fifoPnlRealized", "realizedPnl", "fifoPnl"):
@@ -186,9 +203,37 @@ def trade_metrics(trades):
 # --------------------------------------------------------------------------- #
 # 基于每日 NAV 的指标（权益曲线 / 回撤 / 夏普）
 # --------------------------------------------------------------------------- #
+TRANSFER_FIELDS = (
+    "depositsWithdrawals",
+    "internalCashTransfers",
+    "paxosTransfers",
+    "assetTransfers",
+    "excessFundSweep",
+    "debitCardActivity",
+    "billPay",
+    "grantActivity",
+)
+
+
+def change_in_nav_period_pnl(row):
+    """ChangeInNAV period P&L, excluding cash / asset transfers."""
+    start = to_float(first_field(row, ["startingValue"]))
+    end = to_float(first_field(row, ["endingValue", "endingValueSecurities"]))
+    if start is None or end is None:
+        return None
+    pnl = end - start
+    for field in TRANSFER_FIELDS:
+        v = to_float(row.get(field))
+        if v is not None:
+            pnl -= v
+    return pnl
+
+
 def equity_metrics(equity_rows, nav_rows):
     notes = []
     series = []       # [(date, accountId, total)] —— 保留 accountId 以便跨账户汇总
+    nav_period_pnl = {}
+    nav_has_multi_day_period = False
 
     if equity_rows:
         for r in equity_rows:
@@ -199,19 +244,38 @@ def equity_metrics(equity_rows, nav_rows):
                 series.append((d, acc, tot))
         source = "equity_summary_in_base_cumulative.csv (total NAV)"
     elif nav_rows:
-        # ChangeInNAV：用每段 endingValue 作为权益点
+        # ChangeInNAV：用每段 startingValue / endingValue 作为权益点。
+        # 如果 Flex Query 取的是 YTD / custom period，这不是逐日序列，但至少可画
+        # 一条期间权益线，并把不含出入金的期间 P&L 放到 toDate。
         for r in nav_rows:
-            d = first_field(r, ["toDate", "reportDate", "date"])
-            tot = to_float(first_field(r, ["endingValue", "endingValueSecurities"]))
+            start_d = first_field(r, ["fromDate"])
+            end_d = first_field(r, ["toDate", "reportDate", "date"])
+            start = to_float(first_field(r, ["startingValue"]))
+            end = to_float(first_field(r, ["endingValue", "endingValueSecurities"]))
             acc = first_field(r, ["accountId"]) or "UNKNOWN"
-            if d and tot is not None:
-                series.append((d, acc, tot))
-        source = "change_in_nav_cumulative.csv (endingValue)"
+            if start_d and start is not None:
+                series.append((start_d, acc, start))
+            if end_d and end is not None:
+                series.append((end_d, acc, end))
+            pnl = change_in_nav_period_pnl(r)
+            if end_d and pnl is not None:
+                nav_period_pnl[(end_d, acc)] = nav_period_pnl.get((end_d, acc), 0.0) + pnl
+            if start_d and end_d and start_d != end_d:
+                nav_has_multi_day_period = True
+        source = "change_in_nav_cumulative.csv (startingValue / endingValue)"
         notes.append(note("EQUITY_USING_NAV_FALLBACK",
-            "未找到每日 Equity Summary，使用 ChangeInNAV 的 endingValue 作为权益点；"
+            "未找到每日 Equity Summary，使用 ChangeInNAV 的 startingValue / endingValue 作为权益点；"
             "建议在 Flex Query 里启用 'Cash Report / Equity Summary by Report Date' 获得更细的每日序列。",
-            "Daily Equity Summary not found; falling back to ChangeInNAV.endingValue. "
+            "Daily Equity Summary not found; falling back to ChangeInNAV startingValue / endingValue. "
             "Enable 'Cash Report / Equity Summary by Report Date' in your Flex Query for finer-grained series."))
+        if nav_has_multi_day_period:
+            notes.append(note("NAV_PERIOD_NOT_DAILY",
+                "当前 ChangeInNAV 跨多日；Daily P&L 图里显示的是期间 P&L（扣除出入金/转账）落在 toDate，"
+                "不是逐日盈亏。要看真正每日盈亏，请把 Flex Query 期间改成 Last Business Day 并每天运行，"
+                "或启用每日 Equity Summary。",
+                "Current ChangeInNAV rows span multiple days; the Daily P&L chart shows period P&L "
+                "(excluding deposits / transfers) on toDate, not true daily P&L. For real daily P&L, "
+                "run a Last Business Day Flex Query daily or enable daily Equity Summary."))
     else:
         return {}, [], [], [note("NO_NAV_SERIES",
             "未找到每日 NAV 序列（Equity Summary 或 ChangeInNAV），跳过回撤/夏普。",
@@ -228,6 +292,9 @@ def equity_metrics(equity_rows, nav_rows):
     for (d, acc), tot in by_date_acc.items():
         sums[d] = sums.get(d, 0.0) + tot
         by_account.setdefault(acc, {})[d] = tot
+    nav_pnl_by_date = {}
+    for (d, _acc), pnl in nav_period_pnl.items():
+        nav_pnl_by_date[d] = nav_pnl_by_date.get(d, 0.0) + pnl
 
     dates = sorted(sums.keys())
     totals = [sums[d] for d in dates]
@@ -263,7 +330,7 @@ def equity_metrics(equity_rows, nav_rows):
             day_pnl = None
             ret = None
         else:
-            day_pnl = totals[i] - totals[i - 1]
+            day_pnl = nav_pnl_by_date.get(dates[i], totals[i] - totals[i - 1])
             ret = (totals[i] / totals[i - 1] - 1.0) if totals[i - 1] else None
             if ret is not None:
                 returns.append(ret)
@@ -575,6 +642,7 @@ def recent_trades(trades, n=0):
     trade 时间字段在 Flex 里可能叫 dateTime / tradeDate+tradeTime。"""
     if not trades:
         return []
+    trades, _ = execution_trades(trades)
     def trade_ts(t):
         # 优先 dateTime；否则拼 tradeDate + tradeTime
         s = first_field(t, ["dateTime", "tradeDateTime"])
