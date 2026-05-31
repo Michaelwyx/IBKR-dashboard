@@ -16,6 +16,14 @@ logs/
 cron.log
 daily.log
 
+# Local screenshots / notes (may contain account IDs etc.)
+*.png
+*.jpg
+*.jpeg
+*.heic
+NOTES.md
+notes.md
+
 # ─── Runtime / OS ─────────────────────────────────────────
 .serve.pid
 __pycache__/

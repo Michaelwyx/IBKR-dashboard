@@ -80,20 +80,34 @@ binds to `127.0.0.1` only.
 
 1. Log into **Client Portal** → menu → **Performance & Reports → Flex Queries**
 2. Next to **Activity Flex Query**, click **+** to create a new one
-3. Name it (e.g., `daily_activity`) and enable these **Sections** with the listed fields:
+3. Name it (e.g., `daily_activity`) and enable these **Sections** (exact labels
+   as they appear in the IBKR UI):
 
-   | Section | Required fields |
+   | Section | What the dashboard does with it |
    |---|---|
-   | **Trades** | Execution-level. Include `Symbol, Asset Class, Trade Date/Time, Buy/Sell, Quantity, Trade Price, IB Commission, Net Cash, FX Rate To Base`, and **`Realized P/L`** (FIFO P/L Realized) |
-   | **Cash Report / Equity Summary** | Enable **Equity Summary by Report Date** |
-   | **Change in NAV** | `Starting/Ending Value, Realized, MTM, Deposits & Withdrawals` |
-   | **Open Positions** | `Symbol, Position, Mark Price, Cost Basis Price, Position Value, FIFO P/L Unrealized, FX Rate To Base, Percent Of NAV` |
+   | **Trades** | Required. Use Execution-level. Include `Symbol, Asset Class, Trade Date/Time, Buy/Sell, Quantity, Trade Price, IB Commission, Net Cash, FX Rate To Base`, and **`Realized P/L`** (FIFO P/L Realized). Drives the Trades tab, By Symbol tab, win rate, realized P&L. |
+   | **Net Asset Value (NAV) in Base** | Required. Parsed as `EquitySummaryInBase`. Drives the Equity Curve, daily P&L series, Today's P&L card, drawdown, Sharpe, and the per-date Cash / Market Value / Position % KPIs. |
+   | **Change in NAV** | Recommended. Per-day P&L decomposition (starting/ending, realized, MTM, deposits & withdrawals). Used as a fallback for the equity series and visible in the Notes tab. |
+   | **Open Positions** | Required. Drives the Positions tab, the sector pies, and the Daily-P&L click-through (positions on any historical date). |
+   | **Cash Transactions** | Optional. Pulled and archived but not yet rendered in the UI. |
+   | **Transfers** | Optional. Same as above — archived for completeness. |
 
-4. **Date Period**: pick `Year to Date` (or `Last 30 Days` for ongoing pulls).
-   *Last Business Day* only gives one day per pull, which makes the dashboard
-   start sparse — pick something longer so dedup can do its job.
-5. **Format**: XML
-6. Save and copy the **Query ID** (a number, usually 7 digits)
+4. **General Configuration** — these settings make the parser work correctly
+   (matches the format ibkr_flex_pull.py expects):
+
+   | Setting | Value |
+   |---|---|
+   | Format | **XML** |
+   | Period | **Year to Date** (recommended for first pull / general use; `Last 30 Days` is fine for ongoing daily refresh) |
+   | Date Format | `yyyyMMdd` |
+   | Time Format | `HHmmss` |
+   | Date/Time Separator | single-space (`' '`) |
+   | Profit and Loss | Default |
+   | Include Currency Rates? | No (the dashboard uses each row's `fxRateToBase` instead) |
+   | Display Account Alias in Place of Account ID? | **No** (the multi-account dedup keys use `accountId`) |
+   | **Breakout by Day?** | **Yes** ← critical: without this, `Net Asset Value (NAV) in Base` and `Open Positions` collapse to a single row per period instead of per-day rows. |
+
+5. Save and copy the **Query ID** (a number, usually 7 digits).
 
 ### 2. Generate a Flex Web Service token
 
