@@ -15,7 +15,11 @@ binds to `127.0.0.1` only.
 
 ### Equity tab
 
-![Equity tab — demo data](docs/screenshots/equity.png)
+![Equity — range selector + KPI cards (demo data)](docs/screenshots/equity.png)
+
+![Equity curve + drawdown (demo data)](docs/screenshots/equity_charts.png)
+
+![Performance statistics (demo data)](docs/screenshots/equity_stats.png)
 
 - Date-range selector: **YTD / Last 3 Months / Last Month / All / Custom** (with date inputs)
 - 3 KPI cards: **Range-end NAV**, **Range P&L** (with net contribution),
