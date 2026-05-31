@@ -215,25 +215,141 @@ TRANSFER_FIELDS = (
 )
 
 
+def net_transfer(row):
+    """Net cash / asset movement: money in minus money out."""
+    total = 0.0
+    seen = False
+    for field in TRANSFER_FIELDS:
+        v = to_float(row.get(field))
+        if v is not None:
+            total += v
+            seen = True
+    return total if seen else 0.0
+
+
+def capital_flows(latest):
+    """Dated external capital flows from the latest Flex pull.
+
+    ChangeInNAV gives a period total. Daily P&L needs dated rows, so use
+    CashTransactions (Deposits/Withdrawals) plus cash Transfers when present.
+    Amounts are converted to base currency via fxRateToBase.
+    """
+    if not latest or "sections" not in latest:
+        return [], [note("CASH_FLOW_NO_LATEST_JSON",
+            "未找到最新拉取 JSON，无法从 CashTransactions / Transfers 读取逐日资金流；"
+            "将只使用 ChangeInNAV 的区间资金流做累计本金兜底。",
+            "Latest pull JSON not found, so dated cash flows cannot be read from "
+            "CashTransactions / Transfers; ChangeInNAV period cash flow is used only as "
+            "a cumulative principal fallback.")]
+
+    flows = []
+    sections = latest.get("sections", {})
+    cash_rows = sections.get("CashTransactions", []) or []
+    has_detail = any((r.get("levelOfDetail") or "").upper() == "DETAIL" for r in cash_rows)
+
+    for r in cash_rows:
+        if (r.get("type") or "").strip().lower() != "deposits/withdrawals":
+            continue
+        level = (r.get("levelOfDetail") or "").upper()
+        if has_detail and level != "DETAIL":
+            continue
+        amount = to_float(r.get("amount"))
+        if not amount:
+            continue
+        fx = to_float(r.get("fxRateToBase")) or 1.0
+        d = first_field(r, ["reportDate", "date", "dateTime", "settleDate"])
+        if d:
+            d = str(d).split(";")[0]
+        if not d:
+            continue
+        flows.append({
+            "date": d,
+            "accountId": first_field(r, ["accountId"]) or "UNKNOWN",
+            "amount": amount * fx,
+            "currency": first_field(r, ["currency"]) or "",
+            "amountNative": amount,
+            "source": "CashTransactions",
+            "description": first_field(r, ["description"]) or "",
+            "transactionID": first_field(r, ["transactionID"]) or "",
+        })
+
+    for r in sections.get("Transfers", []) or []:
+        amount = to_float(first_field(r, ["cashTransfer", "positionAmountInBase", "positionAmount"]))
+        if not amount:
+            continue
+        # cashTransfer is native currency; positionAmountInBase is already base.
+        if "cashTransfer" in r and str(r.get("cashTransfer", "")).strip() != "":
+            amount_base = amount * (to_float(r.get("fxRateToBase")) or 1.0)
+        else:
+            amount_base = amount
+        d = first_field(r, ["reportDate", "date", "dateTime", "settleDate"])
+        if d:
+            d = str(d).split(";")[0]
+        if not d:
+            continue
+        flows.append({
+            "date": d,
+            "accountId": first_field(r, ["accountId"]) or "UNKNOWN",
+            "amount": amount_base,
+            "currency": first_field(r, ["currency"]) or "",
+            "amountNative": amount,
+            "source": "Transfers",
+            "description": first_field(r, ["description"]) or "",
+            "transactionID": first_field(r, ["transactionID"]) or "",
+        })
+
+    flows.sort(key=lambda r: (r["date"], r["source"], r.get("transactionID", "")))
+    for r in flows:
+        r["amount"] = round(r["amount"], 2)
+        r["amountNative"] = round(r["amountNative"], 2)
+
+    notes = []
+    if flows:
+        notes.append(note("CASH_FLOW_DATED",
+            "逐日资金流来自 CashTransactions 的 Deposits/Withdrawals 明细和 Transfers 的 cashTransfer；"
+            "ChangeInNAV 的跨期资金流只用于累计本金校验/兜底，不再落到最后一天。",
+            "Dated capital flows come from CashTransactions Deposits/Withdrawals detail rows and "
+            "Transfers cashTransfer rows; multi-day ChangeInNAV cash flow is used only for "
+            "cumulative principal validation/fallback, not posted to the last day."))
+    else:
+        notes.append(note("CASH_FLOW_DATED_MISSING",
+            "未找到 CashTransactions / Transfers 的逐日资金流明细；每日盈亏不会把 ChangeInNAV 的跨期资金流"
+            "硬记到最后一天，但资金流当天的 Daily P&L 可能仍需要补充 Flex 明细后才能完全剔除。",
+            "No dated capital-flow detail was found in CashTransactions / Transfers. Daily P&L will "
+            "not force multi-day ChangeInNAV cash flow onto the last day, but cash-flow days may still "
+            "need those Flex details to be fully adjusted."))
+    return flows, notes
+
+
 def change_in_nav_period_pnl(row):
     """ChangeInNAV period P&L, excluding cash / asset transfers."""
     start = to_float(first_field(row, ["startingValue"]))
     end = to_float(first_field(row, ["endingValue", "endingValueSecurities"]))
     if start is None or end is None:
         return None
-    pnl = end - start
-    for field in TRANSFER_FIELDS:
-        v = to_float(row.get(field))
-        if v is not None:
-            pnl -= v
-    return pnl
+    return end - start - net_transfer(row)
 
 
-def equity_metrics(equity_rows, nav_rows):
+def equity_metrics(equity_rows, nav_rows, cash_flows=None):
     notes = []
     series = []       # [(date, accountId, total)] —— 保留 accountId 以便跨账户汇总
-    nav_period_pnl = {}
+    cash_flow_by_date_acc = {}
+    cash_flows = cash_flows or []
     nav_has_multi_day_period = False
+    nav_total_contribution = sum(net_transfer(r) for r in nav_rows)
+
+    for f in cash_flows:
+        d = f.get("date")
+        acc = f.get("accountId") or "UNKNOWN"
+        flow = to_float(f.get("amount")) or 0.0
+        if d and flow:
+            cash_flow_by_date_acc[(d, acc)] = cash_flow_by_date_acc.get((d, acc), 0.0) + flow
+
+    for r in nav_rows:
+        end_d = first_field(r, ["toDate", "reportDate", "date"])
+        start_d = first_field(r, ["fromDate"])
+        if start_d and end_d and start_d != end_d:
+            nav_has_multi_day_period = True
 
     if equity_rows:
         for r in equity_rows:
@@ -243,6 +359,13 @@ def equity_metrics(equity_rows, nav_rows):
             if d and tot is not None:
                 series.append((d, acc, tot))
         source = "equity_summary_in_base_cumulative.csv (total NAV)"
+        if nav_has_multi_day_period and not cash_flows:
+            notes.append(note("CASH_FLOW_PERIOD_DATED",
+                "当前 ChangeInNAV 的资金流是跨多日汇总，且缺少逐日资金流明细；累计盈亏会剔除区间资金流，"
+                "但 Daily P&L 不会把该资金流硬记到 toDate。",
+                "Current ChangeInNAV cash flows span multiple days and dated cash-flow detail is "
+                "missing. Cumulative P&L excludes the period cash flow, but Daily P&L will not force "
+                "that cash flow onto toDate."))
     elif nav_rows:
         # ChangeInNAV：用每段 startingValue / endingValue 作为权益点。
         # 如果 Flex Query 取的是 YTD / custom period，这不是逐日序列，但至少可画
@@ -257,11 +380,6 @@ def equity_metrics(equity_rows, nav_rows):
                 series.append((start_d, acc, start))
             if end_d and end is not None:
                 series.append((end_d, acc, end))
-            pnl = change_in_nav_period_pnl(r)
-            if end_d and pnl is not None:
-                nav_period_pnl[(end_d, acc)] = nav_period_pnl.get((end_d, acc), 0.0) + pnl
-            if start_d and end_d and start_d != end_d:
-                nav_has_multi_day_period = True
         source = "change_in_nav_cumulative.csv (startingValue / endingValue)"
         notes.append(note("EQUITY_USING_NAV_FALLBACK",
             "未找到每日 Equity Summary，使用 ChangeInNAV 的 startingValue / endingValue 作为权益点；"
@@ -292,9 +410,20 @@ def equity_metrics(equity_rows, nav_rows):
     for (d, acc), tot in by_date_acc.items():
         sums[d] = sums.get(d, 0.0) + tot
         by_account.setdefault(acc, {})[d] = tot
-    nav_pnl_by_date = {}
-    for (d, _acc), pnl in nav_period_pnl.items():
-        nav_pnl_by_date[d] = nav_pnl_by_date.get(d, 0.0) + pnl
+    cash_flow_by_date = {}
+    for (d, _acc), flow in cash_flow_by_date_acc.items():
+        cash_flow_by_date[d] = cash_flow_by_date.get(d, 0.0) + flow
+    dated_contribution = sum(cash_flow_by_date.values())
+    principal = dated_contribution if cash_flows else nav_total_contribution
+
+    if cash_flows and nav_rows and abs(dated_contribution - nav_total_contribution) > 0.01:
+        notes.append(note("CASH_FLOW_MISMATCH",
+            "CashTransactions / Transfers 的逐日资金流合计 %.2f，与 ChangeInNAV 的区间资金流 %.2f 不一致；"
+            "每日盈亏使用逐日明细，本金使用逐日明细合计。"
+            % (dated_contribution, nav_total_contribution),
+            "Dated CashTransactions / Transfers flows total %.2f, while ChangeInNAV period cash flow "
+            "is %.2f. Daily P&L and principal use the dated detail total."
+            % (dated_contribution, nav_total_contribution)))
 
     dates = sorted(sums.keys())
     totals = [sums[d] for d in dates]
@@ -325,13 +454,18 @@ def equity_metrics(equity_rows, nav_rows):
     # 每日盈亏与收益率
     daily = []
     returns = []
+    daily_contribution = 0.0
     for i in range(len(dates)):
+        flow = cash_flow_by_date.get(dates[i], 0.0)
+        daily_contribution += flow
         if i == 0:
             day_pnl = None
             ret = None
         else:
-            day_pnl = nav_pnl_by_date.get(dates[i], totals[i] - totals[i - 1])
+            day_pnl = totals[i] - totals[i - 1] - flow
             ret = (totals[i] / totals[i - 1] - 1.0) if totals[i - 1] else None
+            if totals[i - 1]:
+                ret = day_pnl / totals[i - 1]
             if ret is not None:
                 returns.append(ret)
         daily.append({
@@ -339,6 +473,8 @@ def equity_metrics(equity_rows, nav_rows):
             "total": round(totals[i], 2),
             "dayPnl": round(day_pnl, 2) if day_pnl is not None else None,
             "dayReturnPct": round(ret * 100, 4) if ret is not None else None,
+            "netContribution": round(flow, 2),
+            "netContributionCumulative": round(daily_contribution, 2),
         })
 
     # 最大回撤（基于权益曲线）
@@ -363,22 +499,36 @@ def equity_metrics(equity_rows, nav_rows):
         if std_r > 0:
             sharpe = (mean_r / std_r) * math.sqrt(252)
 
+    cumulative_pnl = totals[-1] - totals[0] - principal
+    time_weighted_return = None
+    if returns:
+        growth = 1.0
+        for r in returns:
+            growth *= (1.0 + r)
+        time_weighted_return = growth - 1.0
+    return_on_principal = (cumulative_pnl / principal) if principal else None
+
     overall = {
         "navStart": round(totals[0], 2),
         "navEnd": round(totals[-1], 2),
-        "cumulativePnlFromEquity": round(totals[-1] - totals[0], 2),
+        "principal": round(principal, 2),
+        "netContribution": round(principal, 2),
+        "cumulativePnlFromEquity": round(cumulative_pnl, 2),
+        "cumulativePnlBeforeFlows": round(totals[-1] - totals[0], 2),
+        "returnOnPrincipalPct": round(return_on_principal * 100, 3) if return_on_principal is not None else None,
+        "timeWeightedReturnPct": round(time_weighted_return * 100, 3) if time_weighted_return is not None else None,
         "maxDrawdown": round(max_dd, 2),
         "maxDrawdownPct": round(max_dd_pct * 100, 3),
         "sharpeAnnualized": round(sharpe, 3) if sharpe is not None else None,
         "tradingDays": len(dates),
         "navSource": source,
     }
-    notes.append(note("METRICS_NAV_CAVEAT",
-        "回撤/收益率/夏普基于 NAV 总值，包含出入金影响。若有大额转账，请改用 ChangeInNAV "
-        "中分解出的交易盈亏，或在网站侧扣除 depositsWithdrawals。",
-        "Drawdown / return / Sharpe are based on total NAV, which includes deposits & withdrawals. "
-        "For large transfers, prefer the trading P&L decomposition from ChangeInNAV, or subtract "
-        "depositsWithdrawals on the analysis side."))
+    notes.append(note("METRICS_CASH_FLOW_ADJUSTED",
+        "每日盈亏、累计盈亏、按本金收益率和时间加权收益率均已剔除已定位到日期的出入金/转账。"
+        "本金 = 总转入 - 总转出；期初 NAV 单独展示，不再当作本金。",
+        "Daily P&L, cumulative P&L, return on principal, and time-weighted return exclude dated "
+        "deposits / withdrawals / transfers. Principal = total inflows minus total outflows; "
+        "starting NAV is shown separately and is no longer treated as principal."))
     return overall, daily, by_account_series, notes
 
 
@@ -699,7 +849,8 @@ def main():
     latest_path, latest_json = load_latest_pull(data_dir)
 
     t_overall, by_symbol, t_notes = trade_metrics(trades)
-    e_overall, daily, by_account, e_notes = equity_metrics(equity, nav)
+    cash_flows, cf_notes = capital_flows(latest_json)
+    e_overall, daily, by_account, e_notes = equity_metrics(equity, nav, cash_flows)
     positions, positions_by_date, p_notes = open_positions(latest_json)
     rt = recent_trades(trades, n=args.recent_n)
     acct_summary = account_summary(equity)
@@ -727,11 +878,12 @@ def main():
         "sectorBreakdown": sec_break,
         "bySymbol": by_symbol,
         "daily": daily,
+        "cashFlows": cash_flows,
         "byAccount": by_account,
         "positions": positions,
         "positionsByDate": positions_by_date,
         "recentTrades": rt,
-        "notes": t_notes + e_notes + p_notes,
+        "notes": t_notes + cf_notes + e_notes + p_notes,
     }
 
     out_path = os.path.join(data_dir, "metrics.json")
