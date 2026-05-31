@@ -8,11 +8,8 @@ interactive dashboard served on `localhost`.
 Everything — data, analysis, dashboard — stays on your machine. The HTTP server
 binds to `127.0.0.1` only.
 
-> 📊 **The screenshots below use anonymized demo data, not a real account** — a
-> synthetic ~30-ticker portfolio (roughly **3× a $25k principal** over ~6 months,
-> **~74% invested** with a cash buffer, **−12% max drawdown**, ~76% win rate).
-> Sectors are an illustrative **半导体 / 存储 / CPO / 太空 + 其他** split. The numbers
-> are fabricated to exercise the dashboard — not real holdings, not advice.
+> 📊 **The screenshots below use anonymized demo data, not a real account.** All
+> figures are generated for illustration only — not investment advice.
 
 ## Features
 
@@ -64,7 +61,7 @@ binds to `127.0.0.1` only.
   - **By Sector** — merged into sectors, with sector names on slices
 
 ![Positions allocation — demo data](docs/screenshots/positions_alloc.png)
-<sub>↑ Demo data. The two doughnuts + the per-sector table (4 sectors + 其他 + cash).</sub>
+<sub>↑ Demo data. The two doughnuts + the per-sector table (4 named sectors + Other + cash).</sub>
 
 ### Trades tab
 
@@ -96,7 +93,7 @@ binds to `127.0.0.1` only.
 <sub>↑ Demo data. Clicking a symbol opens its candlestick with your buy/sell markers + trade history (truncated here).</sub>
 
 ### Cross-cutting
-- **i18n** — English / 中文 toggle, persisted in localStorage
+- **i18n** — English / Chinese toggle, persisted in localStorage
 - **Light / Dark themes** — toggle in top-right, persisted
 - **Multi-currency aware** — JPY / HKD / USD positions and trades normalized to
   base currency via per-row `fxRateToBase`; native amounts shown alongside
@@ -181,7 +178,7 @@ Alternatively use an env var (safer): set `"token": "env:IBKR_FLEX_TOKEN"` and
 
 `sectors.json` maps tickers to sectors used in the Positions allocation pies and
 the Daily P&L day-card. **Edit it for your portfolio.** Tickers not listed fall
-into "其他" (Other). Option OCC symbols auto-resolve to their underlying.
+into "Other". Option OCC symbols auto-resolve to their underlying.
 
 ### 5. Run
 
@@ -296,7 +293,7 @@ If you change the Query's Date Period after pulling once, run
 - **Today's P&L** (per position): `(mark_today − mark_yesterday) × position × fx`.
   Computed from two consecutive `OpenPositions` snapshots; needs ≥ 2 days of data.
 - **Positions sector**: comes from `sectors.json` (manual mapping). Unknown
-  tickers go to "其他". Options use their underlying.
+  tickers go to "Other". Options use their underlying.
 
 ## Daily / scheduled runs
 
