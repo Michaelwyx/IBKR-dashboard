@@ -15,19 +15,19 @@ binds to `127.0.0.1` only.
 
 ### Equity tab
 
-![Equity — range selector + KPI cards (demo data)](docs/screenshots/equity.png)
+![Equity tab — range selector + KPI cards (demo data)](docs/screenshots/equity.png)
 
-![Equity curve + drawdown (demo data)](docs/screenshots/equity_charts.png)
-
-![Performance statistics (demo data)](docs/screenshots/equity_stats.png)
-
-- Date-range selector: **YTD / Last 3 Months / Last Month / All / Custom** (with date inputs)
-- 3 KPI cards: **Range-end NAV**, **Range P&L** (with net contribution),
-  **Time-weighted return** (with return-on-principal)
-- Equity curve + drawdown (low-saturation palette)
-- Full performance statistics: **Principal (net contribution)**, starting NAV,
-  cumulative P&L, **return on principal**, **time-weighted return**, drawdown,
-  Sharpe, win rate, realized P&L, commissions, currencies traded
+- **Date-range selector**: YTD / Last 3 Months / Last Month / All / Custom (with date inputs);
+  every KPI and chart below recomputes for the selected window
+- **3 KPI cards** (shown above): Range-end NAV, Range P&L (with net contribution),
+  Time-weighted return (with return-on-principal)
+- **Equity curve** — net liquidation value over the selected range, with the area
+  under the line shaded (low-saturation palette)
+- **Drawdown chart** — running peak-to-trough percentage below the line, so corrections
+  are easy to spot at a glance
+- **Performance statistics** list: Principal (net contribution), starting NAV,
+  cumulative P&L, return on principal, time-weighted return, max drawdown,
+  annualized Sharpe, win rate, realized P&L, total commission, currencies traded
 - **Deposits / withdrawals are excluded** from P&L, returns and contribution — a
   mid-period top-up/withdrawal in the demo does not show up as a gain or loss
 
