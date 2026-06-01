@@ -51,7 +51,7 @@ binds to `127.0.0.1` only.
 ### Positions tab
 
 ![Positions — demo data](docs/screenshots/positions.png)
-<sub>↑ Demo portfolio at real prices. ~85% invested with a positive cash buffer (no margin); top holdings shown (list truncated).</sub>
+<sub>↑ Demo portfolio at real prices. ~75% invested with a positive cash buffer (no margin); top holdings shown (list truncated).</sub>
 
 - 4 KPI cards: Total NLV / Market Value / Cash / Position % of NAV (with
   negative-cash margin warning)
