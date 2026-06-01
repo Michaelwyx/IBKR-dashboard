@@ -8,8 +8,9 @@ interactive dashboard served on `localhost`.
 Everything — data, analysis, dashboard — stays on your machine. The HTTP server
 binds to `127.0.0.1` only.
 
-> 📊 **The screenshots below use anonymized demo data, not a real account.** All
-> figures are generated for illustration only — not investment advice.
+> 📊 **The screenshots below show a demo portfolio, not a real account** — the
+> holdings, share counts and trades are illustrative (not investment advice).
+> **Prices are real Yahoo Finance market data**, so each ticker shows its real history.
 
 ## Features
 
@@ -45,12 +46,12 @@ binds to `127.0.0.1` only.
   - Full position list **for that date** (same columns as Positions tab)
 
 ![Daily P&L date drill-through — demo data](docs/screenshots/daily_detail.png)
-<sub>↑ Demo data. Clicking a date expands that day's snapshot — KPIs, sector pie, and the positions held on that exact date (list truncated here).</sub>
+<sub>↑ Demo portfolio. Clicking a date expands that day's snapshot — KPIs, sector pie, and the positions held on that exact date (list truncated here).</sub>
 
 ### Positions tab
 
 ![Positions — demo data](docs/screenshots/positions.png)
-<sub>↑ Demo data. 74% invested with a positive cash buffer (no margin); top holdings shown (list truncated).</sub>
+<sub>↑ Demo portfolio at real prices. ~85% invested with a positive cash buffer (no margin); top holdings shown (list truncated).</sub>
 
 - 4 KPI cards: Total NLV / Market Value / Cash / Position % of NAV (with
   negative-cash margin warning)
@@ -65,12 +66,12 @@ binds to `127.0.0.1` only.
   - **By Sector** — merged into sectors, with sector names on slices
 
 ![Positions allocation — demo data](docs/screenshots/positions_alloc.png)
-<sub>↑ Demo data. The two doughnuts + the per-sector table (4 named sectors + Other + cash).</sub>
+<sub>↑ Demo portfolio. The two doughnuts + the per-sector table (4 named sectors + Other + cash).</sub>
 
 ### Trades tab
 
 ![Trades — demo data](docs/screenshots/trades.png)
-<sub>↑ Demo data. Filtered to the last week (the count shows N / total); note the JPY fill on 285A.T.</sub>
+<sub>↑ Demo portfolio. Filtered to the last week (the count shows N / total); note the JPY fill on 285A.T.</sub>
 
 - Time-window filter via dropdown (Last Day / Week / Month / 3 Months / YTD)
 - Category filter (All / Stocks / Options)
@@ -79,7 +80,7 @@ binds to `127.0.0.1` only.
 ### By Symbol tab
 
 ![By Symbol diverging chart — demo data](docs/screenshots/bySymbol.png)
-<sub>↑ Demo data. Realized P&L per symbol — winners extend right, the few cut losers sit left.</sub>
+<sub>↑ Demo portfolio. Realized P&L per symbol — winners extend right, the few cut losers sit left.</sub>
 
 - **Diverging Top-N chart** — gains right, losses left, sorted by impact
   (smallest loss on top, biggest loss pinned at bottom)
@@ -94,7 +95,7 @@ binds to `127.0.0.1` only.
   - Full trade history for that ticker (options auto-grouped to underlying)
 
 ![By Symbol candlestick drill-through — demo data](docs/screenshots/bySymbol_detail.png)
-<sub>↑ Demo data. Clicking a symbol opens its candlestick with your buy/sell markers + trade history (truncated here).</sub>
+<sub>↑ Demo portfolio at real prices. Clicking a symbol opens its real Yahoo candlestick with buy/sell markers + trade history (truncated here).</sub>
 
 ### Cross-cutting
 - **i18n** — English / Chinese toggle, persisted in localStorage
