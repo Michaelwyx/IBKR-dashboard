@@ -864,6 +864,23 @@ def main():
     for d in positions_by_date:
         for p in positions_by_date[d]:
             p["sector"] = resolve_sector(p, sector_map)
+
+    # % of NAV 修正：用 positionValueInBase / 当日 NLV 重新计算，不直接信 Flex 字段。
+    # IBKR Flex 对期权的 percentOfNAV 恒为 100.00（脏数据），照搬会让每个期权都显示成占 NAV 100%。
+    # 顺带把股票也统一成「相对跨账户合计 NLV」口径（更适合这个合并视图）。
+    nlv = (acct_summary or {}).get("totalNlv")
+    if nlv:
+        for p in positions:
+            pv = p.get("positionValueInBase")
+            p["percentOfNAV"] = round(pv / nlv * 100, 4) if pv is not None else None
+    for d, plist in positions_by_date.items():
+        dnlv = (acct_summary_by_date.get(d) or {}).get("totalNlv")
+        if not dnlv:
+            continue
+        for p in plist:
+            pv = p.get("positionValueInBase")
+            p["percentOfNAV"] = round(pv / dnlv * 100, 4) if pv is not None else None
+
     sec_break = sector_breakdown(positions)
 
     metrics = {
