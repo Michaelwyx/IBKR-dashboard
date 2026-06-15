@@ -24,6 +24,10 @@ const I18N = {
     "equity.range.custom": "自定义",
     "equity.range.from": "开始",
     "equity.range.to": "结束",
+    "equity.scale.linear": "线性",
+    "equity.scale.log": "对数",
+    "equity.series.equity": "权益",
+    "equity.series.perf": "收益率",
     "kpi.nlv": "区间末 NAV",
     "kpi.todayPnl": "区间盈亏",
     "kpi.ytdReturn": "时间加权收益率",
@@ -50,6 +54,8 @@ const I18N = {
     "daily.gran.day": "日",
     "daily.gran.week": "周",
     "daily.gran.month": "月",
+    "daily.mode.amount": "金额",
+    "daily.mode.pct": "百分比",
     "daily.summary.total": "区间合计",
     "daily.summary.best": "最佳",
     "daily.summary.worst": "最差",
@@ -156,6 +162,10 @@ const I18N = {
     "equity.range.custom": "Custom",
     "equity.range.from": "From",
     "equity.range.to": "To",
+    "equity.scale.linear": "Linear",
+    "equity.scale.log": "Log",
+    "equity.series.equity": "Equity",
+    "equity.series.perf": "Performance",
     "kpi.nlv": "Range-end NAV",
     "kpi.todayPnl": "Range P&L",
     "kpi.ytdReturn": "Time-weighted Return",
@@ -182,6 +192,8 @@ const I18N = {
     "daily.gran.day": "Day",
     "daily.gran.week": "Week",
     "daily.gran.month": "Month",
+    "daily.mode.amount": "Amount",
+    "daily.mode.pct": "Percent",
     "daily.summary.total": "Period total",
     "daily.summary.best": "Best",
     "daily.summary.worst": "Worst",
@@ -281,7 +293,11 @@ const state = {
   equityRange: localStorage.getItem("ibkr.equityRange") || "ytd", // all | ytd | 3m | 1m | custom
   equityStart: localStorage.getItem("ibkr.equityStart") || "",
   equityEnd: localStorage.getItem("ibkr.equityEnd") || "",
+  equityScale: localStorage.getItem("ibkr.equityScale") || "linear", // linear | log（权益左轴的刻度）
+  equityShowEquity: localStorage.getItem("ibkr.equityShowEquity") !== "0", // 左轴：权益 ($)
+  equityShowPerf: localStorage.getItem("ibkr.equityShowPerf") !== "0",      // 右轴：累计收益率 (%)
   granularity: "day",      // day | week | month
+  calMode: localStorage.getItem("ibkr.calMode") || "amount",  // amount | pct（日历显示金额 / 百分比）
   selectedDay: null,       // 用户点击 daily P&L 后选中的日期 (ISO "2026-05-22")
   selectedSymbol: null,    // 用户点击 By Symbol 后选中的 ticker（已转成 underlying）
   tradeRange: "1w",            // 1d | 1w | 1m | 3m | ytd
@@ -341,6 +357,13 @@ const fmtPnlK = (n) => {
 };
 
 const fmtPct = (n, d = 2) => (n == null || Number.isNaN(n)) ? "—" : n.toFixed(d) + "%";
+// 日历单元格里的紧凑百分比（含正负号），如 +4.4% / -1.2% / +13%。
+// 两位数及以上去掉小数，免得在窄的「日」格里换行。
+const fmtPctCell = (n) => {
+  if (n == null || Number.isNaN(n)) return "—";
+  const d = Math.abs(n) >= 10 ? 0 : 1;
+  return (n >= 0 ? "+" : "") + n.toFixed(d) + "%";
+};
 const fmtRate = (n) => (n == null) ? "—" : (n * 100).toFixed(1) + "%";
 const fmtNum = (n, d = 2) => (n == null || Number.isNaN(n)) ? "—"
   : Number(n).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -491,34 +514,88 @@ function renderEquityControls(daily) {
   if (end && state.equityRange !== "custom") end.value = inputDate(bounds.end);
 }
 
+// 在当前区间内重新画权益曲线（切换刻度 / 显示项时用，不必重渲整页）
+function rerenderEquityChart() {
+  const daily = (state.data && state.data.metrics && state.data.metrics.daily) || [];
+  renderEquityChart(filteredEquityDaily(daily));
+}
+
 function renderEquityChart(daily) {
   destroyChart("equity");
   if (!daily || !daily.length) return;
   const th = chartTheme();
+  const perfColor = "#d98a3d"; // 橙色：和权益线区分
+
+  // 累计收益率（%）：把每日 dayReturnPct 复利，区间起点 = 0%。
+  // 用日收益而非净值，天然剔除了资金进出，是更干净的「performance」口径。
+  let growth = 1;
+  const perf = daily.map((d, i) => {
+    if (i === 0) return 0;
+    const r = d.dayReturnPct;
+    if (r != null && Number.isFinite(r)) growth *= (1 + r / 100);
+    return (growth - 1) * 100;
+  });
+
+  const showEq = state.equityShowEquity;
+  const showPf = state.equityShowPerf;
+  const isLog = state.equityScale === "log";
+
+  const datasets = [];
+  if (showEq) datasets.push({
+    label: t("equity.series.equity"),
+    data: daily.map(d => d.total),
+    yAxisID: "yEquity",
+    borderColor: th.chartLine,
+    backgroundColor: th.chartArea,
+    fill: !showPf,          // 两条线同时显示时不填充，免得盖住收益率线
+    tension: 0.2, pointRadius: 0, pointHoverRadius: 4, borderWidth: 1.6,
+  });
+  if (showPf) datasets.push({
+    label: t("equity.series.perf"),
+    data: perf,
+    yAxisID: "yPerf",
+    borderColor: perfColor,
+    backgroundColor: "rgba(217,138,61,0.10)",
+    fill: false,
+    tension: 0.2, pointRadius: 0, pointHoverRadius: 4, borderWidth: 1.6,
+  });
+
   charts.equity = new Chart(document.getElementById("equityChart"), {
     type: "line",
-    data: {
-      labels: daily.map(d => d.date),
-      datasets: [{
-        label: t("app.nlv"),
-        data: daily.map(d => d.total),
-        borderColor: th.chartLine,
-        backgroundColor: th.chartArea,
-        fill: true,
-        tension: 0.2,
-        pointRadius: 0,
-        pointHoverRadius: 4,
-        borderWidth: 1.6,
-      }],
-    },
+    data: { labels: daily.map(d => d.date), datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       interaction: { mode: "index", intersect: false },
-      plugins: { legend: { display: false } },
+      plugins: {
+        legend: { display: datasets.length > 1, position: "top", labels: { boxWidth: 12, boxHeight: 12, usePointStyle: true } },
+        tooltip: {
+          callbacks: {
+            label: (c) => {
+              const v = c.parsed.y;
+              if (v == null) return null;
+              return c.dataset.yAxisID === "yPerf"
+                ? `${c.dataset.label}: ${v >= 0 ? "+" : ""}${v.toFixed(2)}%`
+                : `${c.dataset.label}: $${fmtMoneyCompact(v)}`;
+            },
+          },
+        },
+      },
       scales: {
         x: { grid: { color: th.grid }, ticks: { maxTicksLimit: 10 } },
-        y: { grid: { color: th.grid }, ticks: { callback: v => "$" + fmtMoneyCompact(v) } },
+        yEquity: {
+          display: showEq,
+          type: isLog ? "logarithmic" : "linear",
+          position: "left",
+          grid: { color: th.grid },
+          ticks: { callback: v => "$" + fmtMoneyCompact(v) },
+        },
+        yPerf: {
+          display: showPf,
+          position: "right",
+          grid: { drawOnChartArea: false },
+          ticks: { callback: v => (v >= 0 ? "+" : "") + v.toFixed(0) + "%" },
+        },
       },
     },
   });
@@ -680,23 +757,31 @@ function monthKey(d) {
 }
 
 function aggregateDaily(daily, granularity) {
-  // daily: [{date, dayPnl, total}]
+  // daily: [{date, dayPnl, dayReturnPct, total}]
   const items = daily.filter(d => d.dayPnl != null).map(d => ({
     dateObj: parseISODate(d.date),
     date: d.date,
     pnl: d.dayPnl,
+    ret: (d.dayReturnPct != null && Number.isFinite(d.dayReturnPct)) ? d.dayReturnPct : null,
   }));
   if (granularity === "day") {
-    return items.map(it => ({ key: formatISODate(it.dateObj), label: formatISODate(it.dateObj), dateObj: it.dateObj, pnl: it.pnl }));
+    // pct = 当日折合收益率（dayPnl / 当日期初权益），直接用后端算好的 dayReturnPct
+    return items.map(it => ({
+      key: formatISODate(it.dateObj), label: formatISODate(it.dateObj),
+      dateObj: it.dateObj, pnl: it.pnl, pct: it.ret,
+    }));
   }
   const grouped = new Map();
   for (const it of items) {
     const key = granularity === "week" ? isoWeekKey(it.dateObj) : monthKey(it.dateObj);
-    if (!grouped.has(key)) grouped.set(key, { key, dateObj: it.dateObj, pnl: 0 });
-    grouped.get(key).pnl += it.pnl;
+    if (!grouped.has(key)) grouped.set(key, { key, dateObj: it.dateObj, pnl: 0, growth: 1 });
+    const g = grouped.get(key);
+    g.pnl += it.pnl;
+    if (it.ret != null) g.growth *= (1 + it.ret / 100); // 周/月：把当期日收益复利
   }
   return [...grouped.values()].sort((a, b) => a.dateObj - b.dateObj).map(g => ({
-    ...g,
+    key: g.key, dateObj: g.dateObj, pnl: g.pnl,
+    pct: (g.growth - 1) * 100,
     label: granularity === "week"
       ? g.key
       : `${g.dateObj.getUTCFullYear()}-${String(g.dateObj.getUTCMonth()+1).padStart(2,"0")}`,
@@ -758,9 +843,9 @@ function percentile(arr, p) {
   return sorted[idx];
 }
 
-function maxAbsForScale(items) {
-  // Use 90th-percentile of |pnl| so outliers don't wash out the gradient
-  const abs = items.filter(i => i.pnl).map(i => Math.abs(i.pnl));
+function maxAbsForScale(items, valOf = it => it.pnl) {
+  // Use 90th-percentile of |value| so outliers don't wash out the gradient
+  const abs = items.map(valOf).filter(v => v != null && v).map(Math.abs);
   if (!abs.length) return 0;
   return percentile(abs, 90) || Math.max(...abs);
 }
@@ -772,7 +857,14 @@ function renderCalendar(items, granularity) {
     wrap.innerHTML = `<div class="empty">${t("empty.noData")}</div>`;
     return;
   }
-  const maxAbs = maxAbsForScale(items);
+  // 金额 / 百分比两种口径：百分比按当日折合收益率（已在 aggregateDaily 里算好）
+  const usePct = state.calMode === "pct";
+  const view = {
+    valOf:   it => usePct ? it.pct : it.pnl,
+    fmtCell: v => v == null ? "—" : (usePct ? fmtPctCell(v) : fmtPnlK(v)),
+    fmtFull: v => v == null ? "—" : (usePct ? fmtPct(v, 2) : fmtMoney(v)),
+  };
+  view.maxAbs = maxAbsForScale(items, view.valOf);
 
   // legend 放在日历视图最上方
   const legend = document.createElement("div");
@@ -791,11 +883,11 @@ function renderCalendar(items, granularity) {
   wrap.appendChild(legend);
 
   if (granularity === "day") {
-    renderDayCalendar(wrap, items, maxAbs);
+    renderDayCalendar(wrap, items, view);
   } else if (granularity === "week") {
-    renderWeekCalendar(wrap, items, maxAbs);
+    renderWeekCalendar(wrap, items, view);
   } else {
-    renderMonthCalendar(wrap, items, maxAbs);
+    renderMonthCalendar(wrap, items, view);
   }
 }
 
@@ -819,7 +911,7 @@ function buildMonthSection(yr, mo) {
   return section;
 }
 
-function renderDayCalendar(wrap, items, maxAbs) {
+function renderDayCalendar(wrap, items, view) {
   // 多月在一行：用 auto-fill 网格包裹各月份；每月内 5 列（Mon-Fri，去掉周末）
   const container = document.createElement("div");
   container.className = "cal-day-months";
@@ -870,15 +962,15 @@ function renderDayCalendar(wrap, items, maxAbs) {
       const item = itemByDay.get(d);
       if (item) {
         cell.classList.add("has-data", "clickable", item.pnl >= 0 ? "pos" : "neg");
-        const bg = colorForPnl(item.pnl, maxAbs);
+        const bg = colorForPnl(view.valOf(item), view.maxAbs);
         if (bg) cell.style.background = bg;
         const iso = formatISODate(item.dateObj);
         cell.dataset.date = iso;
         cell.innerHTML = `
           <span class="cal-cell-date">${d}</span>
-          <span class="cal-cell-value">${fmtPnlK(item.pnl)}</span>
+          <span class="cal-cell-value">${view.fmtCell(view.valOf(item))}</span>
         `;
-        cell.title = `${iso}: ${fmtMoney(item.pnl)} — click for positions`;
+        cell.title = `${iso}: ${view.fmtFull(view.valOf(item))} — click for positions`;
         cell.addEventListener("click", () => selectDay(iso));
       } else {
         cell.innerHTML = `<span class="cal-cell-date">${d}</span>`;
@@ -891,7 +983,7 @@ function renderDayCalendar(wrap, items, maxAbs) {
   wrap.appendChild(container);
 }
 
-function renderWeekCalendar(wrap, items, maxAbs) {
+function renderWeekCalendar(wrap, items, view) {
   // 按月分组（用 week 起始日所在月份），每月一行 week cells
   const byMonth = groupByMonth(items);
   for (const ym of [...byMonth.keys()].sort()) {
@@ -903,13 +995,13 @@ function renderWeekCalendar(wrap, items, maxAbs) {
     for (const it of byMonth.get(ym)) {
       const cell = document.createElement("div");
       cell.className = `cal-cell cal-cell-week has-data ${it.pnl >= 0 ? "pos" : "neg"}`;
-      const bg = colorForPnl(it.pnl, maxAbs);
+      const bg = colorForPnl(view.valOf(it), view.maxAbs);
       if (bg) cell.style.background = bg;
       cell.innerHTML = `
         <span class="cal-cell-date">${it.label}</span>
-        <span class="cal-cell-value">${fmtPnlK(it.pnl)}</span>
+        <span class="cal-cell-value">${view.fmtCell(view.valOf(it))}</span>
       `;
-      cell.title = `${it.label}: ${fmtMoney(it.pnl)}`;
+      cell.title = `${it.label}: ${view.fmtFull(view.valOf(it))}`;
       row.appendChild(cell);
     }
     section.appendChild(row);
@@ -917,7 +1009,7 @@ function renderWeekCalendar(wrap, items, maxAbs) {
   }
 }
 
-function renderMonthCalendar(wrap, items, maxAbs) {
+function renderMonthCalendar(wrap, items, view) {
   // 按年分组，每年 12 个月格（无数据的月份留空格但显示月份名）
   const byYear = new Map();
   for (const it of items) {
@@ -941,13 +1033,13 @@ function renderMonthCalendar(wrap, items, maxAbs) {
       cell.className = "cal-cell cal-cell-month";
       if (item) {
         cell.classList.add("has-data", item.pnl >= 0 ? "pos" : "neg");
-        const bg = colorForPnl(item.pnl, maxAbs);
+        const bg = colorForPnl(view.valOf(item), view.maxAbs);
         if (bg) cell.style.background = bg;
         cell.innerHTML = `
           <span class="cal-cell-date">${t("month.full")[m]}</span>
-          <span class="cal-cell-value">${fmtPnlK(item.pnl)}</span>
+          <span class="cal-cell-value">${view.fmtCell(view.valOf(item))}</span>
         `;
-        cell.title = `${yr}-${String(m + 1).padStart(2, "0")}: ${fmtMoney(item.pnl)}`;
+        cell.title = `${yr}-${String(m + 1).padStart(2, "0")}: ${view.fmtFull(view.valOf(item))}`;
       } else {
         cell.innerHTML = `<span class="cal-cell-date">${t("month.full")[m]}</span>`;
       }
@@ -1913,6 +2005,7 @@ function wireControls() {
 
   document.querySelectorAll(".seg-group").forEach(group => {
     const control = group.dataset.control;
+    if (!control) return;   // 跳过非单选组（如 equitySeries 这种独立开关组，另行处理）
     group.querySelectorAll(".seg").forEach(seg => {
       seg.addEventListener("click", () => {
         group.querySelectorAll(".seg").forEach(s => s.classList.remove("active"));
@@ -1921,6 +2014,14 @@ function wireControls() {
         if (control === "equityRange") {
           localStorage.setItem("ibkr.equityRange", state.equityRange);
           renderAll();
+        }
+        else if (control === "equityScale") {
+          localStorage.setItem("ibkr.equityScale", state.equityScale);
+          rerenderEquityChart();
+        }
+        else if (control === "calMode") {
+          localStorage.setItem("ibkr.calMode", state.calMode);
+          renderDaily();
         }
         // 路由：哪个 control 触发哪个重渲染
         else if (control === "granularity") renderDaily();
@@ -1934,6 +2035,41 @@ function wireControls() {
       });
     });
   });
+
+  // 持久化的单选组：按 state 同步 active（HTML 默认值可能和 localStorage 不一致）
+  ["equityScale", "calMode"].forEach(ctrl => {
+    document.querySelectorAll(`[data-control="${ctrl}"] .seg`).forEach(seg => {
+      seg.classList.toggle("active", seg.dataset.value === state[ctrl]);
+    });
+  });
+
+  // 权益曲线的「Equity / Performance」是两个独立开关（可同时亮），不走单选逻辑
+  const seriesGroup = document.querySelector('[data-toggle="equitySeries"]');
+  if (seriesGroup) {
+    const syncSeries = () => {
+      seriesGroup.querySelectorAll(".seg").forEach(b => {
+        const on = b.dataset.series === "equity" ? state.equityShowEquity : state.equityShowPerf;
+        b.classList.toggle("active", on);
+      });
+    };
+    syncSeries();
+    seriesGroup.querySelectorAll(".seg").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const isEq = btn.dataset.series === "equity";
+        if (isEq) state.equityShowEquity = !state.equityShowEquity;
+        else state.equityShowPerf = !state.equityShowPerf;
+        // 不允许两条线都关掉：若都为关，则点哪条就保留另一条
+        if (!state.equityShowEquity && !state.equityShowPerf) {
+          if (isEq) state.equityShowPerf = true;
+          else state.equityShowEquity = true;
+        }
+        localStorage.setItem("ibkr.equityShowEquity", state.equityShowEquity ? "1" : "0");
+        localStorage.setItem("ibkr.equityShowPerf", state.equityShowPerf ? "1" : "0");
+        syncSeries();
+        rerenderEquityChart();
+      });
+    });
+  }
 
   // <select> 控件（toggle list）
   const tradeRangeSel = document.getElementById("tradeRangeSelect");

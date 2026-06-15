@@ -487,6 +487,33 @@ footer span { margin: 0 6px; }
   box-shadow: var(--shadow);
 }
 
+/* 卡片标题行：左标题、右控件（权益曲线的刻度 / 显示项开关） */
+.chart-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.chart-head h2 { margin: 0; }
+.chart-head-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* 子标题行：左 sub-heading、右控件（日历的金额 / 百分比开关） */
+.sub-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.sub-head-row .sub-heading { margin-bottom: 0; }
+
 .pnl-summary {
   font-size: 13px;
   color: var(--text-muted);
@@ -598,6 +625,7 @@ footer span { margin: 0 6px; }
   font-size: 13px;
   font-weight: 500;
   letter-spacing: -0.2px;
+  white-space: nowrap;
 }
 
 .cal-week-row {

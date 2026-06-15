@@ -71,7 +71,19 @@
       <div class="kpi-row" id="equityKpis"></div>
 
       <div class="card">
-        <h2 data-i18n="equity.curve">Equity Curve</h2>
+        <div class="chart-head">
+          <div class="chart-head-left">
+            <h2 data-i18n="equity.curve">Equity Curve</h2>
+            <div class="seg-group" data-control="equityScale" role="tablist">
+              <button class="seg active" data-value="linear" data-i18n="equity.scale.linear">Linear</button>
+              <button class="seg" data-value="log" data-i18n="equity.scale.log">Log</button>
+            </div>
+          </div>
+          <div class="seg-group" data-toggle="equitySeries">
+            <button class="seg active" data-series="equity" data-i18n="equity.series.equity">Equity</button>
+            <button class="seg active" data-series="perf" data-i18n="equity.series.perf">Performance</button>
+          </div>
+        </div>
         <div class="chart-wrap"><canvas id="equityChart"></canvas></div>
       </div>
       <div class="card">
@@ -99,7 +111,13 @@
         <h3 class="sub-heading" data-i18n="daily.barTitle">Bar Chart</h3>
         <div class="chart-wrap"><canvas id="dailyPnlChart"></canvas></div>
         <hr class="card-sep" />
-        <h3 class="sub-heading" data-i18n="daily.calendarTitle">Calendar</h3>
+        <div class="sub-head-row">
+          <h3 class="sub-heading" data-i18n="daily.calendarTitle">Calendar</h3>
+          <div class="seg-group" data-control="calMode" role="tablist">
+            <button class="seg active" data-value="amount" data-i18n="daily.mode.amount">Amount</button>
+            <button class="seg" data-value="pct" data-i18n="daily.mode.pct">Percent</button>
+          </div>
+        </div>
         <div class="calendar-wrap" id="dailyCalendarWrap"></div>
         <div class="muted daily-hint" data-i18n="daily.clickHint">Tip: click any bar or day in the calendar (day granularity only) to see positions held on that date.</div>
       </div>
